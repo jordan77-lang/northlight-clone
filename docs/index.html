@@ -113,7 +113,7 @@
             <p><strong>Game Mode Controls:</strong></p>
             <p>WASD / Arrow Keys - Move</p>
             <p>Mouse - Look around</p>
-            <p>Click to enable</p>
+            <p style="color: red;text-transform: uppercase;">Click to enter game mode</p>
             <p>ESC - Release mouse</p>
         </div>
     </div>
@@ -244,19 +244,21 @@
             gameModeBtn.disabled = true;
         }
         
+        let pointerLockReady = false;
+
         function setMode(mode) {
             currentMode = mode;
             needsRender = true;
-            
             if (mode === 'game') {
+                pointerLockReady = false; // require one extra click inside the canvas
                 gameModeBtn.classList.add('active');
                 exploreModeBtn.classList.remove('active');
                 controlsInfo.innerHTML = `
                     <p><strong>Game Mode Controls:</strong></p>
                     <p>WASD / Arrow Keys - Move</p>
                     <p>Mouse - Look around</p>
-                    <p>Click to enable</p>
-                    <p>ESC - Release mouse</p>
+                    <p style="color: red; background:white; padding:2px 5px;text-transform: uppercase;">Click anywhere to enable navigation</p>
+                    <p>(press ESC to release mouse lock)</p>
                 `;
                 isLocked = false;
                 camera.position.set(-4, 5.2, 20);
@@ -2066,10 +2068,14 @@
         let pitch = 0;
         let yaw = 0;
         
-        const pointerSpeed = 0.005;
+        const pointerSpeed = 0.004;
         
         document.addEventListener('click', () => {
             if (currentMode === 'game') {
+                if (!pointerLockReady) {
+                    pointerLockReady = true; // first click arms the lock
+                    return;
+                }
                 document.body.requestPointerLock();
             }
         });

@@ -197,9 +197,8 @@
         // Renderer
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.shadowMap.enabled = false;
         renderer.toneMapping = THREE.NoToneMapping;
         renderer.localClippingEnabled = true; // Enable local clipping for Y-axis cropping
         renderer.xr.enabled = true;

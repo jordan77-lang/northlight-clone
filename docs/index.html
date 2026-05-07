@@ -566,88 +566,96 @@
         });
 
         // Procedural concrete floor texture
+        // Floor texture — rust-shader style (octave fbm noise) in concrete colors
+        // Recreates boytchev TSL rust using Canvas 2D pixel loop
         function createConcreteTexture() {
-            const size = 1024;
+            const size = 512;
             const canvas = document.createElement('canvas');
-            canvas.width = size;
-            canvas.height = size;
+            canvas.width = canvas.height = size;
             const ctx = canvas.getContext('2d');
 
-            // Base dark-grey concrete
-            ctx.fillStyle = '#818181';
-            ctx.fillRect(0, 0, size, size);
+            // --- Value noise helpers (tileable via modular grid) ---
+            const PERM_SIZE = 256;
+            const perm = new Uint8Array(PERM_SIZE);
+            for (let i = 0; i < PERM_SIZE; i++) perm[i] = i;
+            for (let i = PERM_SIZE - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [perm[i], perm[j]] = [perm[j], perm[i]];
+            }
 
-            // Large-scale value variation — placed in wrapped 3×3 grid so
-            // radial gradients that cross an edge continue on the other side,
-            // making the texture seamlessly tileable.
-            for (let i = 0; i < 14; i++) {
-                const cx = Math.random() * size;
-                const cy = Math.random() * size;
-                const r = 100 + Math.random() * 200;
-                const light = Math.random() > 0.5;
-                // Draw the same gradient in all 9 tile positions
-                for (let tx = -1; tx <= 1; tx++) {
-                    for (let ty = -1; ty <= 1; ty++) {
-                        const ox = cx + tx * size;
-                        const oy = cy + ty * size;
-                        const grad = ctx.createRadialGradient(ox, oy, 0, ox, oy, r);
-                        grad.addColorStop(0, light ? 'rgba(120,120,115,0.20)' : 'rgba(20,20,18,0.15)');
-                        grad.addColorStop(1, 'rgba(0,0,0,0)');
-                        ctx.fillStyle = grad;
-                        ctx.fillRect(0, 0, size, size);
-                    }
+            function fade(t) { return t * t * (3 - 2 * t); }
+
+            function grad(hash, x, y) {
+                const h = hash & 3;
+                const u = h < 2 ? x : y;
+                const v = h < 2 ? y : x;
+                return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+            }
+
+            function noise2(x, y) {
+                const X = Math.floor(x) & (PERM_SIZE - 1);
+                const Y = Math.floor(y) & (PERM_SIZE - 1);
+                const xf = x - Math.floor(x), yf = y - Math.floor(y);
+                const u = fade(xf), v = fade(yf);
+                const a  = perm[(X)     & 255] + Y;
+                const b  = perm[(X + 1) & 255] + Y;
+                const aa = perm[a & 255],       ab = perm[(a + 1) & 255];
+                const ba = perm[b & 255],       bb = perm[(b + 1) & 255];
+                return (
+                    (1 - v) * ((1 - u) * grad(perm[aa], xf,     yf    ) + u * grad(perm[ba], xf - 1, yf    )) +
+                           v * ((1 - u) * grad(perm[ab], xf,     yf - 1) + u * grad(perm[bb], xf - 1, yf - 1))
+                );
+            }
+
+            // --- Rust fbm kernel: scale=2, iterations=8, amount=-0.3 ---
+            const SCALE = 2.0, ITERS = 8, AMOUNT = -0.3;
+            const freq0 = Math.exp(SCALE / 4 - 1); // ~1.0
+
+            function rustK(nx, ny) {
+                let px = nx * freq0, py = ny * freq0;
+                let k = noise2(px, py);
+                for (let i = 0; i < ITERS; i++) {
+                    px *= 2; py *= 2;
+                    k += noise2(px, py);
+                }
+                k -= Math.abs(noise2(px * 2, py * 2));
+                k = Math.max(0, Math.min(15, k - (AMOUNT * (noise2(px * (AMOUNT / 2 + 4), py * (AMOUNT / 2 + 4)) + 4))));
+                // Apply same transform as shader: k * 1.25, then pow(0.5)
+                k = Math.sqrt(k * 1.25);
+                return Math.max(0, Math.min(1, k / 3.5)); // normalise to 0..1
+            }
+
+            // --- Concrete palette: dark stained base ↔ light weathered surface ---
+            // background (dark wet / shadowed concrete): rgb(52, 50, 46)
+            // color      (light dry concrete face):      rgb(175, 170, 162)
+            const bgR = 42,  bgG = 40,  bgB = 37;
+            const fgR = 140, fgG = 136, fgB = 130;
+
+            const img = ctx.createImageData(size, size);
+            const d = img.data;
+
+            for (let py = 0; py < size; py++) {
+                for (let px = 0; px < size; px++) {
+                    // Map pixel to [0, 4] noise space (tileable by keeping coordinates rational)
+                    const nx = (px / size) * 4;
+                    const ny = (py / size) * 4;
+                    const t = rustK(nx, ny);
+
+                    // Mix: t=0 → foreground (light), t=1 → background (dark)
+                    const r = Math.round(fgR + (bgR - fgR) * t);
+                    const g = Math.round(fgG + (bgG - fgG) * t);
+                    const b = Math.round(fgB + (bgB - fgB) * t);
+
+                    const idx = (py * size + px) * 4;
+                    d[idx]   = r;
+                    d[idx+1] = g;
+                    d[idx+2] = b;
+                    d[idx+3] = 255;
                 }
             }
-
-            // Fine aggregate speckle (uniform — naturally tileable)
-            for (let i = 0; i < 18000; i++) {
-                const x = Math.random() * size;
-                const y = Math.random() * size;
-                const v = Math.floor(Math.random() * 40 + 55);
-                const a = 0.04 + Math.random() * 0.07;
-                ctx.fillStyle = `rgba(${v},${v},${v},${a})`;
-                ctx.fillRect(x, y, 1, 1);
-            }
-
-            // Hairline cracks — kept away from edges to avoid seam artifacts
-            ctx.strokeStyle = 'rgba(70,68,64,0.22)';
-            const margin = size * 0.15;
-            for (let i = 0; i < 8; i++) {
-                ctx.lineWidth = 0.5 + Math.random() * 0.5;
-                ctx.beginPath();
-                let px = margin + Math.random() * (size - margin * 2);
-                let py = margin + Math.random() * (size - margin * 2);
-                ctx.moveTo(px, py);
-                const segs = 4 + Math.floor(Math.random() * 6);
-                for (let s = 0; s < segs; s++) {
-                    px = Math.max(margin, Math.min(size - margin, px + (Math.random() - 0.5) * 80));
-                    py = Math.max(margin, Math.min(size - margin, py + (Math.random() - 0.5) * 80));
-                    ctx.lineTo(px, py);
-                }
-                ctx.stroke();
-            }
-
-            // Subtle stains — also wrapped so they tile seamlessly
-            for (let i = 0; i < 25; i++) {
-                const sx = Math.random() * size;
-                const sy = Math.random() * size;
-                const rx = 12 + Math.random() * 50;
-                const ry = 6 + Math.random() * 30;
-                const angle = Math.random() * Math.PI;
-                const a = 0.025 + Math.random() * 0.05;
-                ctx.fillStyle = `rgba(40,40,38,${a})`;
-                for (let tx = -1; tx <= 1; tx++) {
-                    for (let ty = -1; ty <= 1; ty++) {
-                        ctx.beginPath();
-                        ctx.ellipse(sx + tx * size, sy + ty * size, rx, ry, angle, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                }
-            }
+            ctx.putImageData(img, 0, 0);
 
             const tex = new THREE.CanvasTexture(canvas);
-            // MirroredRepeatWrapping mirrors alternate tiles so any remaining
-            // edge discontinuities become invisible.
             tex.wrapS = THREE.MirroredRepeatWrapping;
             tex.wrapT = THREE.MirroredRepeatWrapping;
             tex.repeat.set(4, 9);

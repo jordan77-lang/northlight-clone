@@ -326,7 +326,7 @@
         let sofaModel = null;
         let table2Model = null;
         let sofa2Model = null;
-        let sqPedestalModel = null;
+        let sqPedestalModel = null; // unused — now using box geometry
         let recPedestalModel = null;
         let m2PedestalModel = null;
         let m1PedestalModel = null;
@@ -410,41 +410,7 @@
             console.error('Error loading sofa2 model:', error);
         });
 
-        // Load sqPedestal model
-        gltfLoader.load('./building/sqPedestal.glb', (gltf) => {
-            sqPedestalModel = gltf.scene;
-            sqPedestalModel.scale.set(8, 8, 8);
-            console.log('sqPedestal model loaded');
-        }, undefined, (error) => {
-            console.error('Error loading sqPedestal model:', error);
-        });
-
-        // Load recPedestal model
-        gltfLoader.load('./building/recPedestal.glb', (gltf) => {
-            recPedestalModel = gltf.scene;
-            recPedestalModel.scale.set(8, 8, 8);
-            console.log('recPedestal model loaded');
-        }, undefined, (error) => {
-            console.error('Error loading recPedestal model:', error);
-        });
-
-        // Load m2Pedestal model
-        gltfLoader.load('./building/recPedestal.glb', (gltf) => {
-            m2PedestalModel = gltf.scene;
-            m2PedestalModel.scale.set(8, 8, 8);
-            console.log('m2Pedestal model loaded');
-        }, undefined, (error) => {
-            console.error('Error loading m2Pedestal model:', error);
-        });
-
-        // Load m1Pedestal model
-        gltfLoader.load('./building/sqPedestal.glb', (gltf) => {
-            m1PedestalModel = gltf.scene;
-            m1PedestalModel.scale.set(12, 12, 12);
-            console.log('m1Pedestal model loaded');
-        }, undefined, (error) => {
-            console.error('Error loading m1Pedestal model:', error);
-        });
+        // sqPedestal / recPedestal / m2Pedestal / m1Pedestal — replaced with box geometry, no GLB needed
 
         // Load mSeat model
         gltfLoader.load('./building/mSeat.glb', (gltf) => {
@@ -582,10 +548,10 @@
                 if (b2SeatModel) addB2SeatToScene();
                 if (book1Model) addBook1ToScene();
                 if (book2Model) addBook2ToScene();
-                if (sqPedestalModel) addSqPedestalToScene();
-                if (recPedestalModel) addRecPedestalToScene();
-                if (m2PedestalModel) addM2PedestalToScene();
-                if (m1PedestalModel) addM1PedestalToScene();
+                addSqPedestalToScene();
+                addRecPedestalToScene();
+                addM2PedestalToScene();
+                addM1PedestalToScene();
                 if (mSeatModel) addMSeatToScene();
                 needsRender = true; // Trigger render after models are added
             }, 500);
@@ -1627,7 +1593,7 @@
 
             // Clone and add the sofa model to the scene
             const clonedSofa = sofaModel.clone();
-            clonedSofa.position.set(8, 1, 28);
+            clonedSofa.position.set(8, 2, 28);
             clonedSofa.scale.set(15, 15, 15);
             clonedSofa.rotation.y = 90 * (Math.PI / 180); // Rotate 90 degrees to fit the corner
             
@@ -1644,14 +1610,14 @@
 
             // Clone and add the table2 model to the scene
             const clonedTable2 = table2Model.clone();
-            clonedTable2.position.set(18, -1, 29);
+            clonedTable2.position.set(18, 0, 29);
             clonedTable2.scale.set(6, 6, 6);
             
             applyGLBMaterials(clonedTable2);
             scene.add(clonedTable2);
 
             const clonedTable21 = table2Model.clone();
-            clonedTable21.position.set(25,- 1, 29);
+            clonedTable21.position.set(25, 0, 29);
             clonedTable21.scale.set(6, 6, 6);
             applyGLBMaterials(clonedTable21);
             scene.add(clonedTable21);
@@ -1666,7 +1632,7 @@
 
             // Clone and add the sofa2 model to the scene
             const clonedSofa2 = sofa2Model.clone();
-            clonedSofa2.position.set(21, 1, 39);
+            clonedSofa2.position.set(21, 2, 39);
             clonedSofa2.scale.set(17, 17, 17);
             clonedSofa2.rotation.y = Math.PI; // Rotate 180 degrees to fit the opposite corner
             
@@ -1675,72 +1641,34 @@
             console.log('Added sofa2 model to scene');
         }
 
-        function addSqPedestalToScene() {
-            if (!sqPedestalModel) {
-                console.warn('sqPedestal model not loaded yet');
-                return;
-            }
+        function makePedestal(x, y, z, w, h, d, rotY) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(w, h, d),
+                pedestalMaterial
+            );
+            mesh.position.set(x, y + h / 2, z);
+            if (rotY) mesh.rotation.y = rotY;
+            scene.add(mesh);
+        }
 
-            // Clone and add the sqPedestal model to the scene
-            const clonedSqPedestal = sqPedestalModel.clone();
-            clonedSqPedestal.position.set(-39, 2, 7);
-            clonedSqPedestal.rotation.y = 90 * (Math.PI / 180); // Rotate 45 degrees for better angle
-            clonedSqPedestal.scale.set(10, 10, 10);
-            
-            applyPedestalMaterial(clonedSqPedestal);
-            scene.add(clonedSqPedestal);
-            console.log('Added sqPedestal model to scene');
+        function addSqPedestalToScene() {
+            makePedestal(-41, -4, 7,  7, 10, 9);
+            console.log('Added sqPedestal to scene');
         }
 
         function addRecPedestalToScene() {
-            if (!recPedestalModel) {
-                console.warn('recPedestal model not loaded yet');
-                return;
-            }
-
-            // Clone and add the recPedestal model to the scene
-            const clonedRecPedestal = recPedestalModel.clone();
-            clonedRecPedestal.position.set(24, 2, 12);
-            clonedRecPedestal.scale.set(10, 10, 10);
-            
-            applyPedestalMaterial(clonedRecPedestal);
-            scene.add(clonedRecPedestal);
-            console.log('Added recPedestal model to scene');
+            makePedestal(24, 0, 12,  6, 7, 5);
+            console.log('Added recPedestal to scene');
         }
 
         function addM2PedestalToScene() {
-            if (!m2PedestalModel) {
-                console.warn('m2Pedestal model not loaded yet');
-                return;
-            }
-
-            // Clone and add the m2Pedestal model to the scene
-            const clonedM2Pedestal = m1PedestalModel.clone();
-            clonedM2Pedestal.position.set(-15, 2, -84);
-            clonedM2Pedestal.scale.set(8, 8, 8);
-            
-            applyPedestalMaterial(clonedM2Pedestal);
-            scene.add(clonedM2Pedestal);
-            console.log('Added m2Pedestal model to scene');
+            makePedestal(-15, -4, -84,  5, 9, 5);
+            console.log('Added m2Pedestal to scene');
         }
 
-
-
         function addM1PedestalToScene() {
-            if (!m1PedestalModel) {
-                console.warn('m1Pedestal model not loaded yet');
-                return;
-            }
-
-            // Clone and add the m1Pedestal model to the scene
-            const clonedM1Pedestal = m2PedestalModel.clone();
-            clonedM1Pedestal.position.set(-5, 2, -56);
-            clonedM1Pedestal.rotation.y = 45 * (Math.PI / 180); // Rotate 45 degrees for better angle
-            clonedM1Pedestal.scale.set(10, 10, 10);
-            
-            applyPedestalMaterial(clonedM1Pedestal);
-            scene.add(clonedM1Pedestal);
-            console.log('Added m1Pedestal model to scene');
+            makePedestal(-5, -4, -56,  6, 9, 6,  Math.PI / 4);
+            console.log('Added m1Pedestal to scene');
         }
 
         function addMSeatToScene() {
@@ -1822,7 +1750,7 @@
             if (!book1Model) { console.warn('book1 model not loaded yet'); return; }
             const cloned = book1Model.clone();
             cloned.scale.set(6, 6, 6);
-            cloned.position.set(24, 7.2, 12);
+            cloned.position.set(24, 7.3, 12);
             cloned.rotation.y = 0.05;
             applyGLBMaterials(cloned);
             scene.add(cloned);
@@ -1833,8 +1761,8 @@
             if (!book2Model) { console.warn('book2 model not loaded yet'); return; }
             const cloned = book2Model.clone();
             cloned.scale.set(7, 7, 7);
-            cloned.position.set(-40, 6.9, 7);
-            cloned.rotation.y = 1.57; // 90 degrees in radians
+            cloned.position.set(-40, 6.4, 7);
+            cloned.rotation.y = Math.PI /180 * 270
             applyGLBMaterials(cloned);
             scene.add(cloned);
             console.log('Added book2 model to scene');

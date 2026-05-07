@@ -857,8 +857,8 @@
             deck.position.set(CX, CEIL_Y + 0.05, CZ);
             roofGroup.add(deck);
 
-            // ── Solid black top plane (covers roof exterior) ──
-            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+            // ── Translucent black top plane (covers roof exterior) ──
+            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
             const topPlane = new THREE.Mesh(new THREE.PlaneGeometry(W+100, D+100), topMat);
             topPlane.rotation.x = Math.PI * 0.5;
             topPlane.position.set(CX, CEIL_Y + 0.2, CZ);
@@ -923,11 +923,13 @@
 
         
         // Ambient light for overall illumination
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+        const hemiLight = new THREE.HemisphereLight(0xfff4e8, 0x222018, 0.7);
+        scene.add(hemiLight);
         scene.add(ambientLight);
         
         // Directional light from above (like natural light through windows)
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        const directionalLight = new THREE.DirectionalLight(0xfff5e8, 1.4);
         directionalLight.position.set(50, 50, 50);
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 2048;
@@ -939,12 +941,12 @@
         scene.add(directionalLight);
         
         // Fill light from opposite direction
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        const fillLight = new THREE.DirectionalLight(0xe8f0ff, 0.9);
         fillLight.position.set(-50, 30, -50);
         scene.add(fillLight);
 
         // Second fill from front to eliminate dark faces
-        const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.6);
         frontFillLight.position.set(0, 20, 100);
         scene.add(frontFillLight);
 
@@ -964,7 +966,7 @@
             const cx = cv.getContext('2d');
 
             // Base — near-white concrete
-            cx.fillStyle = '#faf9f7';
+            cx.fillStyle = '#fefefe';
             cx.fillRect(0, 0, size, size);
 
             // Large-scale tonal variation (cast shadows between bumps)
@@ -1065,7 +1067,9 @@
 
         const wallpaperMaterial = new THREE.MeshBasicMaterial({
             map: wallTexture,
-            color: 0xefefed,
+            color: 0xffffff,
+            roughness: 0.85,
+            metalness: 0.0,
             side: THREE.DoubleSide
         });
 
@@ -1081,8 +1085,10 @@
             vertexColors: false
         });
         
-        const whiteMaterial = new THREE.MeshBasicMaterial({
+        const whiteMaterial = new THREE.MeshStandardMaterial({
             color: 0xf0f0f0,
+            roughness: 0.8,
+            metalness: 0.0,
             side: THREE.DoubleSide
         });
         
@@ -1149,9 +1155,11 @@
             return texture;
         }
         
-        const wall1Material = new THREE.MeshBasicMaterial({
+        const wall1Material = new THREE.MeshStandardMaterial({
             map: brickTexture,
             color: 0xffffff,
+            roughness: 0.9,
+            metalness: 0.0,
             side: THREE.DoubleSide
         });
         wall1Material.needsUpdate = true;

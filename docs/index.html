@@ -1730,6 +1730,7 @@
             
             applyGLBMaterials(clonedTable);
             scene.add(clonedTable);
+            addObjectCollider(clonedTable);
             console.log('Added table model to scene');
         }
 
@@ -1747,6 +1748,7 @@
             
             applyGLBMaterials(clonedSofa);
             scene.add(clonedSofa);
+            addObjectCollider(clonedSofa);
             console.log('Added sofa model to scene');
         }
 
@@ -1763,12 +1765,14 @@
             
             applyGLBMaterials(clonedTable2);
             scene.add(clonedTable2);
+            addObjectCollider(clonedTable2);
 
             const clonedTable21 = table2Model.clone();
             clonedTable21.position.set(25, 0, 29);
             clonedTable21.scale.set(6, 6, 6);
             applyGLBMaterials(clonedTable21);
             scene.add(clonedTable21);
+            addObjectCollider(clonedTable21);
             console.log('Added table2 model to scene');
         }
 
@@ -1786,6 +1790,7 @@
             
             applyGLBMaterials(clonedSofa2);
             scene.add(clonedSofa2);
+            addObjectCollider(clonedSofa2);
             console.log('Added sofa2 model to scene');
         }
 
@@ -1797,6 +1802,7 @@
             mesh.position.set(x, y + h / 2, z);
             if (rotY) mesh.rotation.y = rotY;
             scene.add(mesh);
+            addObjectCollider(mesh);
         }
 
         function addSqPedestalToScene() {
@@ -1833,6 +1839,7 @@
             
             applyGLBMaterials(clonedMSeat);
             scene.add(clonedMSeat);
+            addObjectCollider(clonedMSeat);
 
             const clonedMSeat1 = mSeatModel.clone();
             clonedMSeat1.position.set(11, 1, -45);
@@ -1840,6 +1847,7 @@
             clonedMSeat1.scale.set(13, 13, 13);
             applyGLBMaterials(clonedMSeat1);
             scene.add(clonedMSeat1);
+            addObjectCollider(clonedMSeat1);
             console.log('Added mSeat model to scene');
         }
 
@@ -1874,6 +1882,7 @@
             
             applyGLBMaterials(clonedB1Seat);
             scene.add(clonedB1Seat);
+            addObjectCollider(clonedB1Seat);
             console.log('Added b1Seat model to scene');
         }
 
@@ -1891,6 +1900,7 @@
             
             applyGLBMaterials(clonedB2Seat);
             scene.add(clonedB2Seat);
+            addObjectCollider(clonedB2Seat);
             console.log('Added b2Seat model to scene');
         }
 
@@ -1902,6 +1912,7 @@
             cloned.rotation.y = 0.05;
             applyGLBMaterials(cloned);
             scene.add(cloned);
+            addObjectCollider(cloned);
             console.log('Added book1 model to scene');
         }
 
@@ -1913,6 +1924,7 @@
             cloned.rotation.y = Math.PI /180 * 270
             applyGLBMaterials(cloned);
             scene.add(cloned);
+            addObjectCollider(cloned);
             console.log('Added book2 model to scene');
         }
 
@@ -2108,6 +2120,17 @@
         // =====================================================
         // COLLISION DETECTION
         // =====================================================
+
+        // Register a world-space AABB collider for any scene object.
+        // Skips objects whose XZ footprint is smaller than minSize (e.g. books on a table).
+        function addObjectCollider(obj, minSize = 0.8) {
+            obj.updateWorldMatrix(true, true);
+            const bbox = new THREE.Box3().setFromObject(obj);
+            const sz = bbox.getSize(new THREE.Vector3());
+            if (sz.x >= minSize || sz.z >= minSize) {
+                wallColliders.push(bbox);
+            }
+        }
         
         function checkCollision(x, z) {
             // Player collision radius (for proximity checking)
@@ -2482,21 +2505,25 @@
         const frontFacade = createBrickFacade(46.6, 30, 0.5);
         frontFacade.position.set(-20.38, 12.5, 32.8);
         scene.add(frontFacade);
+        addObjectCollider(frontFacade);
 
         const backFacade = createBrickFacade(85.35, 30, 0.02);
         backFacade.position.set(-.9, 12.5, -142.5);
-        backFacade.rotation.y = Math.PI; // Rotate 180 degrees to face the correct direction
+        backFacade.rotation.y = Math.PI;
         scene.add(backFacade);
+        addObjectCollider(backFacade);
 
         const leftFacade = createBrickFacade(175.5, 30, 0.5);
         leftFacade.position.set(-43.6, 12.5, -54.7);
         leftFacade.rotation.y = -Math.PI/2;
         scene.add(leftFacade);
+        addObjectCollider(leftFacade);
 
         const rightFacade = createBrickFacade(185.8, 30, 0.2);
         rightFacade.position.set(41.4, 12.5, -49.45);
         rightFacade.rotation.y = Math.PI / 2;
         scene.add(rightFacade);
+        addObjectCollider(rightFacade);
 
         // Hide loading and start
         document.getElementById('loading').style.display = 'none';

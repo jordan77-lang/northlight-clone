@@ -321,6 +321,26 @@
         const wallVisuals = new THREE.Group();
         scene.add(wallVisuals);
 
+        // Placement dispatch: sub-models call this when loaded so they're placed
+        // immediately if the main model is already in the scene, or queued until it is.
+        const _placementQueue = {};
+        function registerPlacement(key, fn) {
+            if (modelScene) { fn(); needsRender = true; }
+            else _placementQueue[key] = fn;
+        }
+        function flushPlacements() {
+            for (const key of Object.keys(_placementQueue)) {
+                _placementQueue[key]();
+                delete _placementQueue[key];
+            }
+            // Non-GLB pedestals (always available, placed once main model is ready)
+            addSqPedestalToScene();
+            addRecPedestalToScene();
+            addM2PedestalToScene();
+            addM1PedestalToScene();
+            needsRender = true;
+        }
+
         // Load window model
         gltfLoader.load('./building/window.glb', (gltf) => {
             windowModel = gltf.scene;
@@ -342,6 +362,7 @@
                 }
             });
             console.log('Window model loaded');
+            registerPlacement('window', () => replaceWindowsWithModel(modelScene));
         }, undefined, (error) => {
             console.error('Error loading window model:', error);
         });
@@ -352,6 +373,7 @@
             frontDoorModel.scale.set(10, 10, 10);
             frontDoorModel.position.set(0, -1, 10);
             console.log('Front door model loaded');
+            registerPlacement('frontdoor', () => replaceDoorWithModel(modelScene));
         }, undefined, (error) => {
             console.error('Error loading front door model:', error);
         });
@@ -361,6 +383,7 @@
             tableModel = gltf.scene;
             tableModel.scale.set(12, 12, 12);
             console.log('Table model loaded');
+            registerPlacement('table', () => addTableToScene());
         }, undefined, (error) => {
             console.error('Error loading table model:', error);
         });
@@ -370,6 +393,7 @@
             sofaModel = gltf.scene;
             sofaModel.scale.set(10, 10, 10);
             console.log('Sofa model loaded');
+            registerPlacement('sofa', () => addSofaToScene());
         }, undefined, (error) => {
             console.error('Error loading sofa model:', error);
         });
@@ -379,6 +403,7 @@
             table2Model = gltf.scene;
             table2Model.scale.set(10, 10, 10);
             console.log('Table2 model loaded');
+            registerPlacement('table2', () => addTable2ToScene());
         }, undefined, (error) => {
             console.error('Error loading table2 model:', error);
         });
@@ -388,6 +413,7 @@
             sofa2Model = gltf.scene;
             sofa2Model.scale.set(10, 10, 10);
             console.log('Sofa2 model loaded');
+            registerPlacement('sofa2', () => addSofa2ToScene());
         }, undefined, (error) => {
             console.error('Error loading sofa2 model:', error);
         });
@@ -399,6 +425,7 @@
             mSeatModel = gltf.scene;
             mSeatModel.scale.set(10, 10, 10);
             console.log('mSeat model loaded');
+            registerPlacement('mSeat', () => addMSeatToScene());
         }, undefined, (error) => {
             console.error('Error loading mSeat model:', error);
         });
@@ -409,6 +436,7 @@
             backdoorModel.scale.set(7, 7, 7);
             backdoorModel.position.set(0, -1, 10);
             console.log('Backdoor model loaded');
+            registerPlacement('backdoor', () => addBackdoorToScene());
         }, undefined, (error) => {
             console.error('Error loading backdoor model:', error);
         });
@@ -418,6 +446,7 @@
             b1SeatModel = gltf.scene;
             b1SeatModel.scale.set(7, 7, 7);
             console.log('b1Seat model loaded');
+            registerPlacement('b1Seat', () => addB1SeatToScene());
         }, undefined, (error) => {
             console.error('Error loading b1Seat model:', error);
         });
@@ -427,6 +456,7 @@
             b2SeatModel = gltf.scene;
             b2SeatModel.scale.set(10, 10, 10);
             console.log('b2Seat model loaded');
+            registerPlacement('b2Seat', () => addB2SeatToScene());
         }, undefined, (error) => {
             console.error('Error loading b2Seat model:', error);
         });
@@ -435,6 +465,7 @@
         gltfLoader.load('./building/book1.glb', (gltf) => {
             book1Model = gltf.scene;
             console.log('book1 model loaded');
+            registerPlacement('book1', () => addBook1ToScene());
         }, undefined, (error) => {
             console.error('Error loading book1 model:', error);
         });
@@ -443,6 +474,7 @@
         gltfLoader.load('./building/book2.glb', (gltf) => {
             book2Model = gltf.scene;
             console.log('book2 model loaded');
+            registerPlacement('book2', () => addBook2ToScene());
         }, undefined, (error) => {
             console.error('Error loading book2 model:', error);
         });
@@ -473,7 +505,7 @@
             greenMaterial.clippingPlanes = [modelClippingPlane];
             yellowMaterial.clippingPlanes = [modelClippingPlane];
             
-            // Find door positions and wall colliders
+            // Find door positions, wall colliders, and enable shadows in a single traverse
             model.traverse((child) => {
                 if (child.isMesh) {
                     // Apply clipping plane to existing materials
@@ -500,43 +532,19 @@
                         wallColliders.push(bbox.clone());
                         console.log('Added wall collider:', child.name, 'Size:', size);
                     }
+
+                    child.castShadow = true;
+                    child.receiveShadow = true;
                 }
             });
             
             // Apply materials to walls and windows
             colorizeModel(model);
             
-            // Enable shadows on the model
-            model.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            
             scene.add(model);
             
-            // Replace windows with window.glb model (with a small delay to ensure it's loaded)
-            setTimeout(() => {
-                console.log('Checking models - windowModel:', !!windowModel, 'frontDoorModel:', !!frontDoorModel, 'tableModel:', !!tableModel, 'sofaModel:', !!sofaModel, 'table2Model:', !!table2Model, 'sofa2Model:', !!sofa2Model, 'sqPedestalModel:', !!sqPedestalModel, 'recPedestalModel:', !!recPedestalModel, 'm2PedestalModel:', !!m2PedestalModel, 'm1PedestalModel:', !!m1PedestalModel, 'mSeatModel:', !!mSeatModel, 'backdoorModel:', !!backdoorModel, 'b1SeatModel:', !!b1SeatModel, 'b2SeatModel:', !!b2SeatModel);
-                if (windowModel) replaceWindowsWithModel(model);
-                if (frontDoorModel) replaceDoorWithModel(model);
-                if (backdoorModel) addBackdoorToScene();
-                if (tableModel) addTableToScene();
-                if (sofaModel) addSofaToScene();
-                if (table2Model) addTable2ToScene();
-                if (sofa2Model) addSofa2ToScene();
-                if (b1SeatModel) addB1SeatToScene();
-                if (b2SeatModel) addB2SeatToScene();
-                if (book1Model) addBook1ToScene();
-                if (book2Model) addBook2ToScene();
-                addSqPedestalToScene();
-                addRecPedestalToScene();
-                addM2PedestalToScene();
-                addM1PedestalToScene();
-                if (mSeatModel) addMSeatToScene();
-                needsRender = true; // Trigger render after models are added
-            }, 500);
+            // Place any sub-models that finished loading before the main model
+            flushPlacements();
             
             // Update debug labels if needed
             updateDebugLabels(model);
@@ -546,105 +554,6 @@
         }, undefined, (error) => {
             console.error('Error loading Northlight model:', error);
         });
-
-        // Procedural concrete floor texture
-        // Floor texture — rust-shader style (octave fbm noise) in concrete colors
-        // Recreates boytchev TSL rust using Canvas 2D pixel loop
-        function createConcreteTexture() {
-            const size = 512;
-            const canvas = document.createElement('canvas');
-            canvas.width = canvas.height = size;
-            const ctx = canvas.getContext('2d');
-
-            // --- Value noise helpers (tileable via modular grid) ---
-            const PERM_SIZE = 256;
-            const perm = new Uint8Array(PERM_SIZE);
-            for (let i = 0; i < PERM_SIZE; i++) perm[i] = i;
-            for (let i = PERM_SIZE - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [perm[i], perm[j]] = [perm[j], perm[i]];
-            }
-
-            function fade(t) { return t * t * (3 - 2 * t); }
-
-            function grad(hash, x, y) {
-                const h = hash & 3;
-                const u = h < 2 ? x : y;
-                const v = h < 2 ? y : x;
-                return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
-            }
-
-            function noise2(x, y) {
-                const X = Math.floor(x) & (PERM_SIZE - 1);
-                const Y = Math.floor(y) & (PERM_SIZE - 1);
-                const xf = x - Math.floor(x), yf = y - Math.floor(y);
-                const u = fade(xf), v = fade(yf);
-                const a  = perm[(X)     & 255] + Y;
-                const b  = perm[(X + 1) & 255] + Y;
-                const aa = perm[a & 255],       ab = perm[(a + 1) & 255];
-                const ba = perm[b & 255],       bb = perm[(b + 1) & 255];
-                return (
-                    (1 - v) * ((1 - u) * grad(perm[aa], xf,     yf    ) + u * grad(perm[ba], xf - 1, yf    )) +
-                           v * ((1 - u) * grad(perm[ab], xf,     yf - 1) + u * grad(perm[bb], xf - 1, yf - 1))
-                );
-            }
-
-            // --- Rust fbm kernel: scale=2, iterations=8, amount=-0.3 ---
-            const SCALE = 2.0, ITERS = 8, AMOUNT = -0.3;
-            const freq0 = Math.exp(SCALE / 4 - 1); // ~1.0
-
-            function rustK(nx, ny) {
-                let px = nx * freq0, py = ny * freq0;
-                let k = noise2(px, py);
-                for (let i = 0; i < ITERS; i++) {
-                    px *= 2; py *= 2;
-                    k += noise2(px, py);
-                }
-                k -= Math.abs(noise2(px * 2, py * 2));
-                k = Math.max(0, Math.min(15, k - (AMOUNT * (noise2(px * (AMOUNT / 2 + 4), py * (AMOUNT / 2 + 4)) + 4))));
-                // Apply same transform as shader: k * 1.25, then pow(0.5)
-                k = Math.sqrt(k * 1.25);
-                return Math.max(0, Math.min(1, k / 3.5)); // normalise to 0..1
-            }
-
-            // --- Concrete palette: dark stained base ↔ light weathered surface ---
-            // background (dark wet / shadowed concrete): rgb(52, 50, 46)
-            // color      (light dry concrete face):      rgb(175, 170, 162)
-            const bgR = 8,   bgG = 8,   bgB = 8;
-            const fgR = 55,  fgG = 53,  fgB = 50;
-
-            const img = ctx.createImageData(size, size);
-            const d = img.data;
-
-            for (let py = 0; py < size; py++) {
-                for (let px = 0; px < size; px++) {
-                    // Map pixel to [0, 4] noise space (tileable by keeping coordinates rational)
-                    const nx = (px / size) * 4;
-                    const ny = (py / size) * 4;
-                    const t = rustK(nx, ny);
-
-                    // Mix: t=0 → foreground (light), t=1 → background (dark)
-                    const r = Math.round(fgR + (bgR - fgR) * t);
-                    const g = Math.round(fgG + (bgG - fgG) * t);
-                    const b = Math.round(fgB + (bgB - fgB) * t);
-
-                    const idx = (py * size + px) * 4;
-                    d[idx]   = r;
-                    d[idx+1] = g;
-                    d[idx+2] = b;
-                    d[idx+3] = 255;
-                }
-            }
-            ctx.putImageData(img, 0, 0);
-
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.MirroredRepeatWrapping;
-            tex.wrapT = THREE.MirroredRepeatWrapping;
-            tex.repeat.set(4, 9);
-            tex.magFilter = THREE.LinearFilter;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            return tex;
-        }
 
         // Exterior ground
         const concreteFloorTexture = textureLoader.load('./building/concrete.png');
@@ -971,7 +880,7 @@
         // Procedural concrete wall texture — inspired by boytchev TSL concrete
         // Recreates the bumpy pitted aggregate look using Canvas 2D
         function createConcreteWallTexture() {
-            const size = 1024;
+            const size = 512; // 512 is plenty for a tiling wall texture (was 1024 — 4× fewer pixels)
             const cv = document.createElement('canvas');
             cv.width = cv.height = size;
             const cx = cv.getContext('2d');
@@ -1001,7 +910,7 @@
 
             // Aggregate bumps — scattered circular highlights + shadow pairs
             // This mimics the raised pebble/bump look of the TSL concrete shader
-            const BUMP_COUNT = 420;
+            const BUMP_COUNT = 110; // scaled with texture size (was 420 for 1024px)
             for (let i = 0; i < BUMP_COUNT; i++) {
                 const bx = Math.random() * size;
                 const by = Math.random() * size;
@@ -1038,7 +947,7 @@
             }
 
             // Fine speckle — cement paste grain
-            for (let i = 0; i < 35000; i++) {
+            for (let i = 0; i < 9000; i++) {
                 const px = Math.random() * size;
                 const py = Math.random() * size;
                 const v  = Math.floor(Math.random() * 12) - 6;
@@ -1074,15 +983,18 @@
             return tex;
         }
 
-        const wallTexture = createConcreteWallTexture();
-
+        // wallpaperMaterial created without map; texture generated after first paint
         const wallpaperMaterial = new THREE.MeshBasicMaterial({
-            map: wallTexture,
-            color: 0xffffff,
+            color: 0xfafaf8,
             roughness: 0.85,
             metalness: 0.0,
             side: THREE.DoubleSide
         });
+        setTimeout(() => {
+            wallpaperMaterial.map = createConcreteWallTexture();
+            wallpaperMaterial.needsUpdate = true;
+            needsRender = true;
+        }, 0);
 
         const brickTexture = textureLoader.load('./building/brick.jpg');
         brickTexture.wrapS = THREE.RepeatWrapping;
@@ -1122,50 +1034,6 @@
             emissive: 0x333300
         });
         
-        // Create procedural brick texture for Wall0
-        function createBrickTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            
-            const brickWidth = 45;
-            const brickHeight = 25;
-            const mortar = 1;
-            const brickColor = '#6B3410';  // Dark brick red
-            const mortarColor = '#D3B7A0';  // Natural mortar tan
-            
-            // Fill background with mortar color
-            ctx.fillStyle = mortarColor;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Draw bricks
-            for (let y = 0; y < canvas.height; y += brickHeight + mortar) {
-                const offset = ((y / (brickHeight + mortar)) % 2) * (brickWidth / 2);
-                for (let x = -offset; x < canvas.width; x += brickWidth + mortar) {
-                    ctx.fillStyle = brickColor;
-                    ctx.fillRect(x, y, brickWidth, brickHeight);
-                    
-                    // Add brick texture variation - darker shadows
-                    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                    ctx.fillRect(x, y, brickWidth, 2);
-                    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                    ctx.fillRect(x, y, 2, brickHeight);
-                    
-                    // Add highlight on bottom and right
-                    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-                    ctx.fillRect(x, y + brickHeight - 2, brickWidth, 2);
-                    ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                    ctx.fillRect(x + brickWidth - 2, y, 2, brickHeight);
-                }
-            }
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.LinearFilter;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            return texture;
-        }
-        
         const wall1Material = new THREE.MeshStandardMaterial({
             map: brickTexture,
             color: 0xffffff,
@@ -1188,7 +1056,8 @@
             const BR = 240, BG = 237, BB = 232;
 
             // Voronoi cell centers — toroidal (seamlessly tileable)
-            const N = 55;
+            // N reduced from 55 → 22: same visual density but 2.5× fewer comparisons per pixel
+            const N = 22;
             const cells = Array.from({length: N}, () => [Math.random() * size, Math.random() * size]);
 
             const img = ctx.createImageData(size, size);
@@ -1196,17 +1065,20 @@
 
             for (let py = 0; py < size; py++) {
                 for (let px = 0; px < size; px++) {
-                    let f1 = Infinity, f2 = Infinity;
+                    // Use squared distances — avoids Math.sqrt per cell (3× speedup)
+                    let f1sq = Infinity, f2sq = Infinity;
                     for (let i = 0; i < N; i++) {
                         // Toroidal distance for seamless tiling
                         let dx = px - cells[i][0];
                         let dy = py - cells[i][1];
                         dx -= Math.round(dx / size) * size;
                         dy -= Math.round(dy / size) * size;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        if (dist < f1) { f2 = f1; f1 = dist; }
-                        else if (dist < f2) { f2 = dist; }
+                        const dsq = dx * dx + dy * dy;
+                        if (dsq < f1sq) { f2sq = f1sq; f1sq = dsq; }
+                        else if (dsq < f2sq) { f2sq = dsq; }
                     }
+                    // Convert back to distances only once at the end
+                    const f1 = Math.sqrt(f1sq), f2 = Math.sqrt(f2sq);
 
                     // edge = 0 at cell boundary, ramps up toward cell interior
                     const edge = Math.min((f2 - f1) / 10, 1.0);
@@ -1237,7 +1109,24 @@
             return texture;
         }
         
-        const roughClayTexture = createRoughClayTexture();
+        // roughClayTexture: 1×1 placeholder so materials can be created immediately;
+        // real texture is generated after first paint and swapped in.
+        const roughClayTexture = (() => {
+            const t = new THREE.DataTexture(new Uint8Array([240,237,232,255]), 1, 1);
+            t.needsUpdate = true;
+            setTimeout(() => {
+                const real = createRoughClayTexture();
+                // Swap into every material that is still holding the placeholder
+                scene.traverse(child => {
+                    if (child.isMesh) {
+                        const mats = Array.isArray(child.material) ? child.material : [child.material];
+                        mats.forEach(m => { if (m && m.map === t) { m.map = real; m.needsUpdate = true; } });
+                    }
+                });
+                needsRender = true;
+            }, 0);
+            return t;
+        })();
         
         // Create procedural stars texture
         function createStarsTexture() {
@@ -1296,12 +1185,16 @@
             return texture;
         }
         
-        const starsTexture = createStarsTexture();
         const tableMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            map: starsTexture,
+            color: 0x111111, // placeholder until stars texture is ready
             side: THREE.DoubleSide
         });
+        setTimeout(() => {
+            tableMaterial.map = createStarsTexture();
+            tableMaterial.color.set(0xffffff);
+            tableMaterial.needsUpdate = true;
+            needsRender = true;
+        }, 0);
         
         // Create procedural roman paving texture
         function createRomanPavingTexture() {

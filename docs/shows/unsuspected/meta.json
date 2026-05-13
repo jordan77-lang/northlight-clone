@@ -7,7 +7,7 @@
         {
             "type": "image",
             "src": "titleText.png",
-            "alt": "A mysterious figure lurking in the shadows of Northlight.",
+            "alt": "",
             "wall": "Wall12",
             "position": {
                 "x": 20,
@@ -20,15 +20,15 @@
                 "z": 0
             },
             "scale": {
-                "x": 0.01,
-                "y": 0.01,
-                "z": 0.01
+                "x": 0.007,
+                "y": 0.007,
+                "z": 0.007
             }
         },
           {
             "type": "image",
             "src": "frontImage.png",
-            "alt": "A mysterious figure lurking in the shadows of Northlight.",
+            "alt": "",
             "wall": "Wall12",
             "position": {
                 "x": -10,
@@ -41,9 +41,53 @@
                 "z": 0
             },
             "scale": {
-                "x": 0.05,
-                "y": 0.05,
-                "z": 0.05
+                "x": 0.007,
+                "y": 0.007,
+                "z": 0.007
+            }
+        },
+          {
+            "type": "image",
+            "src": "frontRoomImg1.png",
+            "frame": "aluminum",
+            "alt": "",
+            "wall": "Wall11",
+            "position": {
+                "x": 0,
+                "y": -8,
+                "z": 40
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.005,
+                "y": 0.005,
+                "z": 0.005
+            }
+        },
+          {
+            "type": "image",
+            "src": "frontRoomImg2.png",
+            "frame": "aluminum",
+            "alt": "",
+            "wall": "Wall11",
+            "position": {
+                "x": 0,
+                "y": -8,
+                "z": 30
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.005,
+                "y": 0.005,
+                "z": 0.005
             }
         }
         

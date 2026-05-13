@@ -2823,8 +2823,10 @@
                         console.log('Adding item to scene:', item);
                         if (item.type === 'image') {
                             // create a plane with the image as texture; size derived from actual image pixels
+                            const imageGroup = new THREE.Group();
                             const material = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.01 });
                             const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+                            imageGroup.add(plane);
                             new THREE.TextureLoader().load('shows/' + showTitle + '/' + item.src, (tex) => {
                                 const imgW = tex.image.naturalWidth  || tex.image.width;
                                 const imgH = tex.image.naturalHeight || tex.image.height;
@@ -2835,6 +2837,26 @@
                                 plane.geometry = new THREE.PlaneGeometry(w, h);
                                 material.map = tex;
                                 material.needsUpdate = true;
+
+                                if (item.frame) {
+                                    const frameColors = { aluminum: 0xbec2c8 };
+                                    const frameColor = frameColors[item.frame] !== undefined ? frameColors[item.frame] : 0xbec2c8;
+                                    const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.85, roughness: 0.25 });
+                                    const t = Math.max(w, h) * 0.02; // bar thickness proportional to image size
+                                    const d = t * 0.8;               // bar depth
+                                    const zo = 0.02;                  // slight z offset in front of image plane
+                                    [
+                                        { bw: w + t * 2, bh: t, bx: 0,              by:  h / 2 + t / 2 },
+                                        { bw: w + t * 2, bh: t, bx: 0,              by: -h / 2 - t / 2 },
+                                        { bw: t,         bh: h, bx: -w / 2 - t / 2, by: 0 },
+                                        { bw: t,         bh: h, bx:  w / 2 + t / 2, by: 0 },
+                                    ].forEach(({ bw, bh, bx, by }) => {
+                                        const bar = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat);
+                                        bar.position.set(bx, by, zo);
+                                        imageGroup.add(bar);
+                                    });
+                                }
+
                                 needsRender = true;
                             });
 
@@ -2854,33 +2876,33 @@
                                         ? (center.x > 0 ? -1 : 1)
                                         : (center.z > 0 ? -1 : 1);
                                     if (minAxis === 'x') {
-                                        plane.rotation.y = inwardSign > 0 ? Math.PI / 2 : -Math.PI / 2;
+                                        imageGroup.rotation.y = inwardSign > 0 ? Math.PI / 2 : -Math.PI / 2;
                                     } else {
-                                        plane.rotation.y = inwardSign > 0 ? 0 : Math.PI;
+                                        imageGroup.rotation.y = inwardSign > 0 ? 0 : Math.PI;
                                     }
                                     // Apply item.rotation as additional adjustment
-                                    plane.rotation.x += item.rotation.x;
-                                    plane.rotation.y += item.rotation.y;
-                                    plane.rotation.z += item.rotation.z;
+                                    imageGroup.rotation.x += item.rotation.x;
+                                    imageGroup.rotation.y += item.rotation.y;
+                                    imageGroup.rotation.z += item.rotation.z;
                                     // Position: wall surface + item.position as local offset from wall centre
                                     const surfaceOffset = 0.1; // slight gap to prevent z-fighting
-                                    plane.position.set(
+                                    imageGroup.position.set(
                                         center.x + item.position.x + (minAxis === 'x' ? inwardSign * (size.x / 2 + surfaceOffset) : 0),
                                         center.y + item.position.y,
                                         center.z + item.position.z + (minAxis === 'z' ? inwardSign * (size.z / 2 + surfaceOffset) : 0)
                                     );
                                 } else {
                                     console.warn('Wall not found:', item.wall);
-                                    plane.position.set(item.position.x, item.position.y, item.position.z);
-                                    plane.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
+                                    imageGroup.position.set(item.position.x, item.position.y, item.position.z);
+                                    imageGroup.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
                                 }
                             } else {
-                                plane.position.set(item.position.x, item.position.y, item.position.z);
-                                plane.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
+                                imageGroup.position.set(item.position.x, item.position.y, item.position.z);
+                                imageGroup.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
                             }
 
-                            plane.scale.set(item.scale.x, item.scale.y, item.scale.z);
-                            scene.add(plane);
+                            imageGroup.scale.set(item.scale.x, item.scale.y, item.scale.z);
+                            scene.add(imageGroup);
                         } else if (item.type === 'model') {
                             // load the model and add to scene
                             gltfLoader.load('shows/' + showTitle + '/' + item.file, (gltf) => {

@@ -156,6 +156,72 @@
                 "z": 0.011
             }
         },
+          {
+            "type": "image",
+            "src": "mRoomImg1.png",
+            "frame": "none",
+            "alt": "",
+            "wall": "Wall11",
+            "position": {
+                "x": 0,
+                "y": -9,
+                "z": -12
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.007,
+                "y": 0.007,
+                "z": 0.007
+            }
+        },
+          {
+            "type": "image",
+            "src": "mRoomImg2.png",
+            "frame": "none",
+            "alt": "",
+            "wall": "Wall11",
+            "position": {
+                "x": 0,
+                "y": -9,
+                "z": -32
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.007,
+                "y": 0.007,
+                "z": 0.007
+            }
+        },
+          {
+            "type": "image",
+            "src": "mRoomImg3.png",
+            "frame": "none",
+            "alt": "",
+            "wall": "Wall11",
+            "position": {
+                "x": 0,
+                "y": -9,
+                "z": -53
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.007,
+                "y": 0.007,
+                "z": 0.007
+            }
+        },
         {
             "type": "model",
             "src": "backHanger.glb",

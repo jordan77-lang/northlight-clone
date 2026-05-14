@@ -2885,8 +2885,8 @@
                 material.map = tex;
                 material.needsUpdate = true;
 
-                // Add frame if specified
-                if (item.frame) {
+                // Add frame if specified and not "none"
+                if (item.frame && item.frame !== 'none') {
                     const frameColors = { aluminum: 0xbec2c8 };
                     const frameColor = frameColors[item.frame] !== undefined ? frameColors[item.frame] : 0xbec2c8;
                     const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.85, roughness: 0.25 });

@@ -587,101 +587,17 @@
 
         (function buildFlatRoof() {
 
-            // ── Wood texture (warm medium-dark like photo) ─────────────────
-            // Canvas 2D port of boytchev processed-wood TSL texture
-            // Algorithm: noise(pos*vec3(xscale,xscale*len,xscale*len)) modulated by
-            // high-freq grain noise, then smoothstepped to ring bands.
-            function mkWood() {
-                const W = 256, H = 512;
-                const cv = document.createElement('canvas');
-                cv.width = W; cv.height = H;
-                const cx = cv.getContext('2d');
 
-                // 3D Perlin noise setup
-                const P = new Uint8Array(512);
-                for (let i = 0; i < 256; i++) P[i] = i;
-                for (let i = 255; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [P[i], P[j]] = [P[j], P[i]];
-                }
-                for (let i = 0; i < 256; i++) P[256 + i] = P[i];
 
-                function fade(t) { return t * t * (3 - 2 * t); }
-                function lerp(a, b, t) { return a + t * (b - a); }
-                function g3(h, x, y, z) {
-                    h &= 15;
-                    const u = h < 8 ? x : y;
-                    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-                    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
-                }
-                function noise3(x, y, z) {
-                    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
-                    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
-                    const u = fade(x), v = fade(y), w = fade(z);
-                    const A = P[X]+Y, AA = P[A]+Z, AB = P[A+1]+Z, B = P[X+1]+Y, BA = P[B]+Z, BB = P[B+1]+Z;
-                    return lerp(
-                        lerp(lerp(g3(P[AA],x,y,z),   g3(P[BA],x-1,y,z),  u),
-                             lerp(g3(P[AB],x,y-1,z), g3(P[BB],x-1,y-1,z),u), v),
-                        lerp(lerp(g3(P[AA+1],x,y,z-1),   g3(P[BA+1],x-1,y,z-1),  u),
-                             lerp(g3(P[AB+1],x,y-1,z-1), g3(P[BB+1],x-1,y-1,z-1),u), v),
-                        w
-                    );
-                }
-
-                // Processed-wood shader parameters (matching TSL defaults)
-                const SCALE = 2, LENGTHS = 4, STRENGTH = 0.3;
-                const xscale = SCALE / 2 + 1;          // 2
-                const len    = 1 / (LENGTHS + 5);      // 1/9 ≈ 0.111
-                const expS   = Math.exp(SCALE);         // e^2 ≈ 7.389
-
-                // Color palette matching the boytchev defaults but warm wood tones
-                // color (grain/dark): #702020 → warm dark brown  background (light): #F0D0A0 → light tan
-                const cR = 0x18, cG = 0x0a, cB = 0x04;
-                const bgR = 0x48, bgG = 0x30, bgB = 0x18;
-
-                const img = cx.createImageData(W, H);
-                const d = img.data;
-
-                for (let py = 0; py < H; py++) {
-                    for (let px = 0; px < W; px++) {
-                        // Shader X = along grain (beam length → texture Y)
-                        // Shader Y = across grain (beam width → texture X)
-                        const sx = (py / H) * expS;
-                        const sy = (px / W) * expS;
-                        const sz = 0.5; // slight Z offset to avoid flat artefacts
-
-                        // k = noise(pos * vec3(xscale, xscale*len, xscale*len))
-                        let k = noise3(sx * xscale, sy * xscale * len, sz * xscale * len);
-
-                        // k *= (noise(pos * vec3(25,1,1)) - 1) * 0.2
-                        k *= (noise3(sx * 25, sy, sz) - 1) * 0.2;
-
-                        // k = 1 - smoothstep(-0.3, 0.3, k + strength - 0.5)
-                        const kk = k + STRENGTH - 0.5;
-                        const t  = Math.max(0, Math.min(1, (kk + 0.3) / 0.6));
-                        const sm = t * t * (3 - 2 * t);
-                        const result = 1 - sm;
-
-                        // mix(color, background, result)
-                        const r = Math.round(cR + (bgR - cR) * result);
-                        const g = Math.round(cG + (bgG - cG) * result);
-                        const b = Math.round(cB + (bgB - cB) * result);
-
-                        const idx = (py * W + px) * 4;
-                        d[idx] = r; d[idx+1] = g; d[idx+2] = b; d[idx+3] = 255;
-                    }
-                }
-                cx.putImageData(img, 0, 0);
-
-                const t = new THREE.CanvasTexture(cv);
-                t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                return t;
-            }
-
-            const woodTex = mkWood();
+            const woodTex = textureLoader.load('./building/wood.png');
+            woodTex.wrapS = THREE.RepeatWrapping;
+            woodTex.wrapT = THREE.RepeatWrapping;
+            woodTex.repeat.set(2, 1);
+            woodTex.magFilter = THREE.LinearFilter;
+            woodTex.minFilter = THREE.LinearMipmapLinearFilter;
 
             // MeshBasicMaterial to stay lit regardless of ambient (consistent with rest of scene)
-            const beamMat = new THREE.MeshStandardMaterial({ map: woodTex, color: 0xffffff });
+            const beamMat = new THREE.MeshBasicMaterial({ map: woodTex, color: 0xf0f0f0 });
             // Cross-brace metal — near-black painted steel like photo
             const braceMat = new THREE.MeshStandardMaterial({ color: 0xa0a0a0 });
             // Dark void above the beams
@@ -773,7 +689,14 @@
             roofGroup.add(deck);
 
             // ── Translucent black top plane (covers roof exterior) ──
-            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
+            const topMatTexture = textureLoader.load('./building/topmat.png');
+            topMatTexture.wrapS = THREE.RepeatWrapping;
+            topMatTexture.wrapT = THREE.RepeatWrapping;
+            topMatTexture.repeat.set(4, 4);
+            topMatTexture.magFilter = THREE.LinearFilter;
+            topMatTexture.minFilter = THREE.LinearMipmapLinearFilter;
+            
+            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.75, map: topMatTexture });
             const topPlane = new THREE.Mesh(new THREE.PlaneGeometry(W+10, D+10), topMat);
             topPlane.rotation.x = Math.PI * 0.5;
             topPlane.position.set(CX, CEIL_Y + 0.2, CZ);
@@ -877,111 +800,7 @@
         // Create clipping plane for Y-axis cropping (will be populated after model loads)
         let modelClippingPlane = null;
 
-        // Procedural concrete wall texture — inspired by boytchev TSL concrete
-        // Recreates the bumpy pitted aggregate look using Canvas 2D
-        function createConcreteWallTexture() {
-            const size = 512; // 512 is plenty for a tiling wall texture (was 1024 — 4× fewer pixels)
-            const cv = document.createElement('canvas');
-            cv.width = cv.height = size;
-            const cx = cv.getContext('2d');
 
-            // Base — near-white concrete
-            cx.fillStyle = '#fefefe';
-            cx.fillRect(0, 0, size, size);
-
-            // Large-scale tonal variation (cast shadows between bumps)
-            for (let i = 0; i < 20; i++) {
-                const bx = Math.random() * size;
-                const by = Math.random() * size;
-                const r  = 80 + Math.random() * 220;
-                const light = Math.random() > 0.45;
-                // draw in 3×3 grid for seamless tiling
-                for (let tx = -1; tx <= 1; tx++) {
-                    for (let ty = -1; ty <= 1; ty++) {
-                        const ox = bx + tx * size, oy = by + ty * size;
-                        const g = cx.createRadialGradient(ox, oy, 0, ox, oy, r);
-                        g.addColorStop(0,   light ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.025)');
-                        g.addColorStop(1,   'rgba(0,0,0,0)');
-                        cx.fillStyle = g;
-                        cx.fillRect(0, 0, size, size);
-                    }
-                }
-            }
-
-            // Aggregate bumps — scattered circular highlights + shadow pairs
-            // This mimics the raised pebble/bump look of the TSL concrete shader
-            const BUMP_COUNT = 110; // scaled with texture size (was 420 for 1024px)
-            for (let i = 0; i < BUMP_COUNT; i++) {
-                const bx = Math.random() * size;
-                const by = Math.random() * size;
-                const r  = 3 + Math.random() * 14;
-
-                // Shadow (bottom-right)
-                for (let tx = -1; tx <= 1; tx++) {
-                    for (let ty = -1; ty <= 1; ty++) {
-                        const ox = bx + tx * size + r * 0.4;
-                        const oy = by + ty * size + r * 0.4;
-                        const gs = cx.createRadialGradient(ox, oy, 0, ox, oy, r * 1.1);
-                        gs.addColorStop(0,   'rgba(0,0,0,0.04)');
-                        gs.addColorStop(1,   'rgba(0,0,0,0)');
-                        cx.fillStyle = gs;
-                        cx.beginPath();
-                        cx.arc(ox, oy, r * 1.1, 0, Math.PI * 2);
-                        cx.fill();
-                    }
-                }
-                // Highlight (top-left)
-                for (let tx = -1; tx <= 1; tx++) {
-                    for (let ty = -1; ty <= 1; ty++) {
-                        const ox = bx + tx * size - r * 0.3;
-                        const oy = by + ty * size - r * 0.3;
-                        const gh = cx.createRadialGradient(ox, oy, 0, ox, oy, r * 0.85);
-                        gh.addColorStop(0,   'rgba(255,255,255,0.28)');
-                        gh.addColorStop(1,   'rgba(255,255,255,0)');
-                        cx.fillStyle = gh;
-                        cx.beginPath();
-                        cx.arc(ox, oy, r * 0.85, 0, Math.PI * 2);
-                        cx.fill();
-                    }
-                }
-            }
-
-            // Fine speckle — cement paste grain
-            for (let i = 0; i < 9000; i++) {
-                const px = Math.random() * size;
-                const py = Math.random() * size;
-                const v  = Math.floor(Math.random() * 12) - 6;
-                const a  = 0.01 + Math.random() * 0.025;
-                const b  = 248 + v;
-                cx.fillStyle = `rgba(${b},${b-2},${b-4},${a})`;
-                cx.fillRect(px, py, 1, 1);
-            }
-
-            // Hairline surface cracks (kept away from edges to avoid seam artifacts)
-            cx.strokeStyle = 'rgba(180,176,170,0.12)';
-            const margin = size * 0.12;
-            for (let i = 0; i < 6; i++) {
-                cx.lineWidth = 0.4 + Math.random() * 0.5;
-                cx.beginPath();
-                let px = margin + Math.random() * (size - margin * 2);
-                let py = margin + Math.random() * (size - margin * 2);
-                cx.moveTo(px, py);
-                for (let s = 0; s < 5 + Math.floor(Math.random() * 5); s++) {
-                    px = Math.max(margin, Math.min(size - margin, px + (Math.random() - 0.5) * 70));
-                    py = Math.max(margin, Math.min(size - margin, py + (Math.random() - 0.5) * 70));
-                    cx.lineTo(px, py);
-                }
-                cx.stroke();
-            }
-
-            const tex = new THREE.CanvasTexture(cv);
-            tex.wrapS = THREE.MirroredRepeatWrapping;
-            tex.wrapT = THREE.MirroredRepeatWrapping;
-            tex.repeat.set(4, 4);
-            tex.magFilter = THREE.LinearFilter;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            return tex;
-        }
 
         // wallpaperMaterial created without map; texture generated after first paint
         const wallpaperMaterial = new THREE.MeshBasicMaterial({
@@ -994,7 +813,7 @@
         const wallTexture = textureLoader.load('./building/wall.png');
         wallTexture.wrapS = THREE.RepeatWrapping;
         wallTexture.wrapT = THREE.RepeatWrapping;
-        wallTexture.repeat.set(4, 4);
+        wallTexture.repeat.set(9, 9);
         wallTexture.magFilter = THREE.LinearFilter;
         wallTexture.minFilter = THREE.LinearMipmapLinearFilter;
         wallpaperMaterial.map = wallTexture;
@@ -1004,6 +823,8 @@
         brickTexture.wrapS = THREE.RepeatWrapping;
         brickTexture.wrapT = THREE.RepeatWrapping;
         brickTexture.repeat.set(2, 3);
+        brickTexture.magFilter = THREE.LinearFilter;
+        brickTexture.minFilter = THREE.LinearMipmapLinearFilter;
 
         const brickMaterial = new THREE.MeshStandardMaterial({
             map: brickTexture,
@@ -1047,90 +868,12 @@
         });
         wall1Material.needsUpdate = true;
         
-        // Create procedural rough clay texture for pedestals (TSL-inspired)
-        // Rough clay texture — Voronoi platelet approach matching boytchev TSL rough-clay
-        // Raised irregular cell centers with dark grooves between them (terracotta palette)
-        function createRoughClayTexture() {
-            const size = 256; // computed via pixel loop; mip-mapped up to display size
-            const canvas = document.createElement('canvas');
-            canvas.width = canvas.height = size;
-            const ctx = canvas.getContext('2d');
-
-            // Off-white base palette
-            const BR = 240, BG = 237, BB = 232;
-
-            // Voronoi cell centers — toroidal (seamlessly tileable)
-            // N reduced from 55 → 22: same visual density but 2.5× fewer comparisons per pixel
-            const N = 22;
-            const cells = Array.from({length: N}, () => [Math.random() * size, Math.random() * size]);
-
-            const img = ctx.createImageData(size, size);
-            const d = img.data;
-
-            for (let py = 0; py < size; py++) {
-                for (let px = 0; px < size; px++) {
-                    // Use squared distances — avoids Math.sqrt per cell (3× speedup)
-                    let f1sq = Infinity, f2sq = Infinity;
-                    for (let i = 0; i < N; i++) {
-                        // Toroidal distance for seamless tiling
-                        let dx = px - cells[i][0];
-                        let dy = py - cells[i][1];
-                        dx -= Math.round(dx / size) * size;
-                        dy -= Math.round(dy / size) * size;
-                        const dsq = dx * dx + dy * dy;
-                        if (dsq < f1sq) { f2sq = f1sq; f1sq = dsq; }
-                        else if (dsq < f2sq) { f2sq = dsq; }
-                    }
-                    // Convert back to distances only once at the end
-                    const f1 = Math.sqrt(f1sq), f2 = Math.sqrt(f2sq);
-
-                    // edge = 0 at cell boundary, ramps up toward cell interior
-                    const edge = Math.min((f2 - f1) / 10, 1.0);
-
-                    // Raised bump: bright at center, grooved/dark at edge
-                    const raise =  edge * 0.20 - 0.02;
-                    const groove = Math.pow(1 - edge, 2.2) * 0.28;
-
-                    // Slight per-pixel noise for grain
-                    const grain = (Math.random() - 0.5) * 10;
-
-                    const idx = (py * size + px) * 4;
-                    d[idx]   = Math.max(0, Math.min(255, BR + raise * 65  - groove * 50  + grain));
-                    d[idx+1] = Math.max(0, Math.min(255, BG + raise * 42  - groove * 35  + grain * 0.8));
-                    d[idx+2] = Math.max(0, Math.min(255, BB + raise * 25  - groove * 22  + grain * 0.6));
-                    d[idx+3] = 255;
-                }
-            }
-
-            ctx.putImageData(img, 0, 0);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.wrapS = THREE.MirroredRepeatWrapping;
-            texture.wrapT = THREE.MirroredRepeatWrapping;
-            texture.repeat.set(3, 3);
-            texture.magFilter = THREE.LinearFilter;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            return texture;
-        }
-        
-        // roughClayTexture: 1×1 placeholder so materials can be created immediately;
-        // real texture is generated after first paint and swapped in.
-        const roughClayTexture = (() => {
-            const t = new THREE.DataTexture(new Uint8Array([240,237,232,255]), 1, 1);
-            t.needsUpdate = true;
-            setTimeout(() => {
-                const real = createRoughClayTexture();
-                // Swap into every material that is still holding the placeholder
-                scene.traverse(child => {
-                    if (child.isMesh) {
-                        const mats = Array.isArray(child.material) ? child.material : [child.material];
-                        mats.forEach(m => { if (m && m.map === t) { m.map = real; m.needsUpdate = true; } });
-                    }
-                });
-                needsRender = true;
-            }, 0);
-            return t;
-        })();
+        const pedestalTexture = textureLoader.load('./building/pedestal.png');
+        pedestalTexture.wrapS = THREE.RepeatWrapping;
+        pedestalTexture.wrapT = THREE.RepeatWrapping;
+        pedestalTexture.repeat.set(4, 9);
+        pedestalTexture.magFilter = THREE.LinearFilter;
+        pedestalTexture.minFilter = THREE.LinearMipmapLinearFilter;
         
         // Create procedural stars texture
         function createStarsTexture() {
@@ -1412,7 +1155,7 @@
         }
         
         const pedestalMaterial = new THREE.MeshBasicMaterial({
-            map: roughClayTexture,
+            map: pedestalTexture,
             color: 0xffffff,
             side: THREE.DoubleSide
         });

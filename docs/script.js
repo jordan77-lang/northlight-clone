@@ -1303,7 +1303,7 @@
 
             // Clone and add the table model to the scene
             const clonedTable = models.table.clone();
-            clonedTable.position.set(-24, 1, 27);
+            clonedTable.position.set(-24, 0, 27);
             clonedTable.scale.set(30, 30, 30);
             
             applyGLBMaterials(clonedTable);
@@ -1714,7 +1714,7 @@
 
             // Clone and add the table2 model to the scene
             const clonedTable2 = models.table2.clone();
-            clonedTable2.position.set(18, 0, 29);
+            clonedTable2.position.set(18, -0.1, 29);
             clonedTable2.scale.set(6, 6, 6);
             
             applyGLBMaterials(clonedTable2);
@@ -1722,7 +1722,7 @@
             addObjectCollider(clonedTable2);
 
             const clonedTable21 = models.table2.clone();
-            clonedTable21.position.set(25, 0, 29);
+            clonedTable21.position.set(25, -0.1, 29);
             clonedTable21.scale.set(6, 6, 6);
             applyGLBMaterials(clonedTable21);
             scene.add(clonedTable21);
@@ -1738,7 +1738,7 @@
 
             // Clone and add the sofa2 model to the scene
             const clonedSofa2 = models.sofa2.clone();
-            clonedSofa2.position.set(21, 2, 39);
+            clonedSofa2.position.set(21, 1.9, 39);
             clonedSofa2.scale.set(17, 17, 17);
             clonedSofa2.rotation.y = Math.PI; // Rotate 180 degrees to fit the opposite corner
             
@@ -1760,12 +1760,12 @@
         }
 
         function addSqPedestalToScene() {
-            makePedestal(-40, -1, 7,  5, 7, 9);
+            makePedestal(-40, -3, 7,  5, 9, 9);
             console.log('Added sqPedestal to scene');
         }
 
         function addRecPedestalToScene() {
-            makePedestal(24, 0, 12,  6, 7, 5);
+            makePedestal(24, -3, 12,  6, 9, 5);
             console.log('Added recPedestal to scene');
         }
 
@@ -1775,7 +1775,7 @@
         }
 
         function addM1PedestalToScene() {
-            makePedestal(-5, -4, -56,  6, 9, 6,  Math.PI / 4);
+            makePedestal(-5, -4, -56,  5, 9, 6,  Math.PI / 4);
             console.log('Added m1Pedestal to scene');
         }
 
@@ -1787,7 +1787,7 @@
 
             // Clone and add the mSeat model to the scene
             const clonedMSeat = models.mSeat.clone();
-            clonedMSeat.position.set(15, 1, -41);
+            clonedMSeat.position.set(15, 0.1, -41);
             clonedMSeat.rotation.y = 45 * (Math.PI / 180); // Rotate 45 degrees for better angle
             clonedMSeat.scale.set(12, 12, 12);
             
@@ -1796,7 +1796,7 @@
             addObjectCollider(clonedMSeat);
 
             const clonedMSeat1 = models.mSeat.clone();
-            clonedMSeat1.position.set(11, 1, -45);
+            clonedMSeat1.position.set(11, 0.1, -45);
             clonedMSeat1.rotation.y = 225 * (Math.PI / 180);
             clonedMSeat1.scale.set(12, 12, 12);
             applyGLBMaterials(clonedMSeat1);
@@ -1862,7 +1862,7 @@
             if (!models.book1) { console.warn('book1 model not loaded yet'); return; }
             const cloned = models.book1.clone();
             cloned.scale.set(6, 6, 6);
-            cloned.position.set(24, 7.3, 12);
+            cloned.position.set(24, 6.4, 12);
             cloned.rotation.y = 0.05;
             applyGLBMaterials(cloned);
             scene.add(cloned);

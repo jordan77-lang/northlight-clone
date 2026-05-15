@@ -2,6 +2,7 @@
         import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
         import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js';
         import { GLTFExporter } from 'https://unpkg.com/three@0.160.0/examples/jsm/exporters/GLTFExporter.js';
+        import { RoomEnvironment } from 'https://unpkg.com/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
 
         // Scene setup
         const scene = new THREE.Scene();
@@ -66,11 +67,16 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFShadowShadowMap;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;  // Softer, more realistic shadow edges
         renderer.toneMapping = THREE.ACESFilmicToneMapping;  // Cinematic look
         renderer.toneMappingExposure = 1.0;  // Adjust exposure for mood
         renderer.outputColorSpace = THREE.SRGBColorSpace;  // Proper color accuracy
         renderer.localClippingEnabled = true;  // Enable local clipping for Y-axis cropping
+
+        // Room environment — free IBL that grounds PBR materials (runs once at load, zero runtime cost)
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+        pmremGenerator.dispose();
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
@@ -684,6 +690,10 @@
             directionalLight.shadow.camera.right = dc.shadow.right;
             directionalLight.shadow.camera.top = dc.shadow.top;
             directionalLight.shadow.camera.bottom = dc.shadow.bottom;
+            directionalLight.shadow.camera.near = 1;
+            directionalLight.shadow.camera.far = 300;  // Tighter far plane = better shadow depth precision
+            directionalLight.shadow.bias = -0.0005;  // Eliminate shadow acne
+            directionalLight.shadow.normalBias = 0.02;  // Prevent streaking on curved surfaces
             scene.add(directionalLight);
             
             // Fill lights
@@ -735,6 +745,8 @@
         brickTexture.repeat.set(2, 3);
         brickTexture.magFilter = THREE.LinearFilter;
         brickTexture.minFilter = THREE.LinearMipmapLinearFilter;
+        brickTexture.colorSpace = THREE.SRGBColorSpace;
+        brickTexture.anisotropy = 16;
 
         const brickMaterial = new THREE.MeshStandardMaterial({
             map: brickTexture,
@@ -784,6 +796,8 @@
         pedestalTexture.repeat.set(4, 9);
         pedestalTexture.magFilter = THREE.LinearFilter;
         pedestalTexture.minFilter = THREE.LinearMipmapLinearFilter;
+        pedestalTexture.colorSpace = THREE.SRGBColorSpace;
+        pedestalTexture.anisotropy = 16;
         
         // Create procedural stars texture
         function createStarsTexture() {

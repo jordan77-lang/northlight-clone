@@ -566,7 +566,7 @@
         const groundGeometry = new THREE.PlaneGeometry(84.8, 186);
         const groundMaterial = new THREE.MeshBasicMaterial({
             map: concreteFloorTexture,
-            color: 0x888888
+            color: 0xaaaaaa
         });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
@@ -985,16 +985,20 @@
 
         // wallpaperMaterial created without map; texture generated after first paint
         const wallpaperMaterial = new THREE.MeshBasicMaterial({
-            color: 0xfafaf8,
-            roughness: 0.85,
+            color: 0xffffff,
+            roughness: 0.0,
             metalness: 0.0,
             side: THREE.DoubleSide
         });
-        setTimeout(() => {
-            wallpaperMaterial.map = createConcreteWallTexture();
-            wallpaperMaterial.needsUpdate = true;
-            needsRender = true;
-        }, 0);
+        
+        const wallTexture = textureLoader.load('./building/wall.png');
+        wallTexture.wrapS = THREE.RepeatWrapping;
+        wallTexture.wrapT = THREE.RepeatWrapping;
+        wallTexture.repeat.set(4, 4);
+        wallTexture.magFilter = THREE.LinearFilter;
+        wallTexture.minFilter = THREE.LinearMipmapLinearFilter;
+        wallpaperMaterial.map = wallTexture;
+        wallpaperMaterial.needsUpdate = true;
 
         const brickTexture = textureLoader.load('./building/brick.jpg');
         brickTexture.wrapS = THREE.RepeatWrapping;

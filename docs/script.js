@@ -15,16 +15,9 @@
         
  
         
-        // Camera spotlight (flashlight)
-        const cameraSpotlight = new THREE.SpotLight(0xffffff, 12.0, 400, Math.PI / 3, 0.4, 1.0);
-        cameraSpotlight.castShadow = false;
-        scene.add(cameraSpotlight);
-        scene.add(cameraSpotlight.target);
-        
         // Helper vector for camera direction
         const cameraDirection = new THREE.Vector3();
-        const cameraSpotlightOffset = new THREE.Vector3(0, 0.5, 0); // Slight offset above camera 
-        
+
         // Door positions and wall colliders for game mode
         let doorPositions = {};
         let wallColliders = []; // Array of bounding boxes for collision detection
@@ -1078,7 +1071,7 @@
             return texture;
         }
         
-        const pedestalMaterial = new THREE.MeshBasicMaterial({
+        const pedestalMaterial = new THREE.MeshStandardMaterial({
             map: pedestalTexture,
             color: 0xffffff,
             side: THREE.DoubleSide
@@ -2431,11 +2424,6 @@
                     }
                     updateCamera(delta);
                 }
-                
-                // Update camera spotlight to follow and point forward
-                cameraSpotlight.position.copy(camera.position).add(cameraSpotlightOffset);
-                camera.getWorldDirection(cameraDirection);
-                cameraSpotlight.target.position.copy(camera.position).addScaledVector(cameraDirection, 100);
                 
                 // Always render in game mode (VR needs every frame)
                 renderer.render(scene, camera);

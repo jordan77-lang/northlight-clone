@@ -6,8 +6,13 @@
 
         // Scene setup
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xb0c4de); // Matches fog colour for seamless horizon
         scene.fog = new THREE.Fog(0xb0c4de, 150, 600);  // Atmospheric fog for depth
+
+        // Sky sphere — MeshBasicMaterial so it's unaffected by lighting
+        const skyGeo = new THREE.SphereGeometry(650, 32, 16);
+        const skyMat = new THREE.MeshBasicMaterial({ color: 0xb0c4de, side: THREE.BackSide });
+        const skySphere = new THREE.Mesh(skyGeo, skyMat);
+        scene.add(skySphere);
 
         // Camera
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.5, 700); // near 0.5 = better Z precision; far 700 = fog ends at 600
@@ -460,7 +465,7 @@
 
         // Add sky blue box
         const boxGeometry = new THREE.BoxGeometry(34, 3, 15);
-        const boxMaterial = new THREE.MeshBasicMaterial({ color: 0x87CEEB });
+        const boxMaterial = new THREE.MeshBasicMaterial({ color: 0xb0c4de });
         const box = new THREE.Mesh(boxGeometry, boxMaterial);
         box.position.set(-28.5, -3, 40.5);
         scene.add(box);
@@ -754,7 +759,7 @@
         });
         
         const skyBlueMaterial = new THREE.MeshBasicMaterial({
-            color: 0x87CEEB,
+            color: 0xb0c4de,
             side: THREE.DoubleSide
         });
         

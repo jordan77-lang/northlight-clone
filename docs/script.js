@@ -438,7 +438,7 @@
         const concreteFloorTexture = textureLoader.load('./building/concrete.png');
         concreteFloorTexture.wrapS = THREE.RepeatWrapping;
         concreteFloorTexture.wrapT = THREE.RepeatWrapping;
-        concreteFloorTexture.repeat.set(4, 9);
+        concreteFloorTexture.repeat.set(1, 2);
         concreteFloorTexture.magFilter = THREE.LinearFilter;
         concreteFloorTexture.minFilter = THREE.LinearMipmapLinearFilter;
         concreteFloorTexture.colorSpace = THREE.SRGBColorSpace;

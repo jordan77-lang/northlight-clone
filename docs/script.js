@@ -575,7 +575,7 @@
             roofGroup.add(deck);
 
             // ── Translucent black top plane (covers roof exterior) ──
-            const topMatTexture = textureLoader.load('./building/topmat.png');
+            const topMatTexture = textureLoader.load('./building/roof.png');
             topMatTexture.wrapS = THREE.RepeatWrapping;
             topMatTexture.wrapT = THREE.RepeatWrapping;
             topMatTexture.repeat.set(4, 4);
@@ -584,7 +584,7 @@
             topMatTexture.colorSpace = THREE.SRGBColorSpace;
             topMatTexture.anisotropy = 8;
             
-            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.75, map: topMatTexture });
+            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.95, map: topMatTexture });
             const topPlane = new THREE.Mesh(new THREE.PlaneGeometry(W+10, D+10), topMat);
             topPlane.rotation.x = Math.PI * 0.5;
             topPlane.position.set(CX, CEIL_Y + 0.2, CZ);
@@ -1823,7 +1823,7 @@
 
             // Clone and add the b1Seat model to the scene
             const clonedB1Seat = models.b1Seat.clone();
-            clonedB1Seat.position.set(-25, 0, -115);
+            clonedB1Seat.position.set(-25, -0.1, -115);
             clonedB1Seat.rotation.y = 45 * (Math.PI / 180);
             clonedB1Seat.scale.set(7, 7, 7);
             
@@ -1841,7 +1841,7 @@
 
             // Clone and add the b2Seat model to the scene
             const clonedB2Seat = models.b2Seat.clone();
-            clonedB2Seat.position.set(20, 0, -115);
+            clonedB2Seat.position.set(20, -0.1, -115);
             clonedB2Seat.rotation.y = 225 * (Math.PI / 180);
             clonedB2Seat.scale.set(8, 8, 8);
             

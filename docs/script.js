@@ -69,6 +69,7 @@
         renderer.toneMapping = THREE.ACESFilmicToneMapping;  // Cinematic look
         renderer.toneMappingExposure = 1.0;  // Adjust exposure for mood
         renderer.outputColorSpace = THREE.SRGBColorSpace;  // Proper color accuracy
+        renderer.dithering = true;  // Eliminate banding in fog/sky gradients — zero cost
         renderer.localClippingEnabled = true;  // Enable local clipping for Y-axis cropping
 
         // Room environment — free IBL that grounds PBR materials (runs once at load, zero runtime cost)
@@ -690,6 +691,7 @@
             directionalLight.shadow.camera.far = 300;  // Tighter far plane = better shadow depth precision
             directionalLight.shadow.bias = -0.0005;  // Eliminate shadow acne
             directionalLight.shadow.normalBias = 0.02;  // Prevent streaking on curved surfaces
+            directionalLight.shadow.radius = 4;  // Softer penumbra edge — free with PCFSoftShadowMap
             scene.add(directionalLight);
             
             // Fill lights

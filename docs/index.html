@@ -94,6 +94,13 @@
         canvas {
             display: block;
         }
+        #vignette {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+            background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%);
+        }
     </style>
 </head>
 <body>
@@ -117,6 +124,7 @@
             <p>ESC - Release mouse</p>
         </div>
     </div>
+    <div id="vignette"></div>
     <div id="loading">Loading...</div>
 
     <script type="importmap">

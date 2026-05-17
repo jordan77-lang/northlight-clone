@@ -7,13 +7,13 @@
         // Scene setup
         const scene = new THREE.Scene();
         scene.fog = new THREE.Fog(0xb0c4de, 150, 600);  // Atmospheric fog for depth
-
+/*
         // Sky sphere — MeshBasicMaterial so it's unaffected by lighting
         const skyGeo = new THREE.SphereGeometry(650, 32, 16);
         const skyMat = new THREE.MeshBasicMaterial({ color: 0xb0c4de, side: THREE.BackSide });
         const skySphere = new THREE.Mesh(skyGeo, skyMat);
         scene.add(skySphere);
-
+*/
         // Camera
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.5, 700); // near 0.5 = better Z precision; far 700 = fog ends at 600
         camera.position.set(0, 5.2, 30); 
@@ -465,7 +465,7 @@
 
         // Add sky blue box — fog:false + same color as skyMat so tone-mapping output matches
         const boxGeometry = new THREE.BoxGeometry(32.5, 2, 11);
-        const boxMat = new THREE.MeshBasicMaterial({ color: 0xb0c4de, fog: false, side: THREE.FrontSide });
+        const boxMat = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false, side: THREE.FrontSide });
         const box = new THREE.Mesh(boxGeometry, boxMat);
         box.position.set(-27.5, -2, 38.5);
         scene.add(box);
@@ -589,7 +589,7 @@
             topMatTexture.colorSpace = THREE.SRGBColorSpace;
             topMatTexture.anisotropy = 8;
             
-            const topMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.95, map: topMatTexture });
+            const topMat = new THREE.MeshStandardMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.95, map: topMatTexture });
             const topPlane = new THREE.Mesh(new THREE.PlaneGeometry(W+10, D+10), topMat);
             topPlane.rotation.x = Math.PI * 0.5;
             topPlane.position.set(CX, CEIL_Y + 0.2, CZ);

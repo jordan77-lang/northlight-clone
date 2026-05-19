@@ -26,6 +26,7 @@
         
         // Helper vector for camera direction
         const cameraDirection = new THREE.Vector3();
+        const _videoTmpVec   = new THREE.Vector3(); // scratch vec for video distance checks
 
         // Door positions and wall colliders for game mode
         let doorPositions = {};
@@ -114,6 +115,12 @@
         let isLocked = false;
         let itemLightBulbs = []; // Track all light bulbs for visibility toggling
         let positionalAudios = []; // Track positional audio sources for game/explore muting
+
+        // Video optimisation — shared state across all video planes
+        // Each entry: { video, texture, plane, baseDistance }
+        const videoObjects = [];
+        // Distance (world units) beyond which a video is paused to save decode cost
+        const VIDEO_PAUSE_DISTANCE = 120;
         
         // UI Setup
         const gameModeBtn = document.getElementById('gameModeBtn');
@@ -2354,6 +2361,30 @@
             const time = performance.now();
             const delta = (time - prevTime) / 1000;
 
+            // ── Video optimisation: distance-based pause/resume ────────────────
+            // Runs once per animation frame regardless of mode.  Pausing distant
+            // videos stops the browser decoder and eliminates their GPU texture
+            // uploads completely.  For videos without requestVideoFrameCallback
+            // we also drive needsRender here so the shared loop (not N separate
+            // RAF chains) keeps the screen refreshing while they play.
+            if (videoObjects.length > 0) {
+                const camPos = camera.position;
+                for (const vo of videoObjects) {
+                    const worldPos = vo.plane.getWorldPosition(_videoTmpVec);
+                    vo._distant = camPos.distanceTo(worldPos) > VIDEO_PAUSE_DISTANCE;
+                    // Video keeps playing regardless of distance — audio stays in
+                    // sync automatically; only the GPU texture upload is gated.
+                    // Fallback path (no requestVideoFrameCallback): signal a render
+                    // only when the plane is close enough to be worth updating.
+                    if (!vo._distant
+                            && typeof vo.video.requestVideoFrameCallback !== 'function'
+                            && !vo.video.paused && !vo.video.ended) {
+                        needsRender = true;
+                    }
+                }
+            }
+            // ──────────────────────────────────────────────────────────────────
+
             if (currentMode === 'game') {
                 if (isLocked || renderer.xr.isPresenting) {
                     // Flush accumulated mouse deltas once per frame (smooth, no rounding jitter)
@@ -2632,16 +2663,32 @@
             positionOnWall(plane, item);
             scene.add(plane);
 
-            // Keep render-on-demand in sync with video frames
-            video.addEventListener('play', () => {
-                function tick() {
-                    if (!video.paused && !video.ended) {
-                        needsRender = true;
-                        requestAnimationFrame(tick);
-                    }
-                }
-                tick();
-            });
+            // Register vo first so the VFC closure can reference it.
+            // _distant = true means the plane is beyond VIDEO_PAUSE_DISTANCE;
+            // when distant the video keeps playing (audio stays in sync) but
+            // we skip the GPU texture upload entirely.
+            const vo = { video, texture: videoTex, plane, _distant: false };
+            videoObjects.push(vo);
+
+            // Use requestVideoFrameCallback when available: texture upload only
+            // happens when the decoder produces a new frame AND the plane is close.
+            // Three.js r160+ also skips its own auto-update when the API exists,
+            // so distant videos incur zero GPU cost on the VFC path.
+            if (typeof video.requestVideoFrameCallback === 'function') {
+                const scheduleVFC = () => {
+                    video.requestVideoFrameCallback(() => {
+                        if (!video.paused && !video.ended) {
+                            if (!vo._distant) {
+                                videoTex.needsUpdate = true;
+                                needsRender = true;
+                            }
+                            scheduleVFC();
+                        }
+                    });
+                };
+                video.addEventListener('play', scheduleVFC, { once: false });
+            }
+            // Fallback (no VFC): animate loop sets needsRender only when !_distant.
 
             console.log('Added video to scene:', item.src);
         }

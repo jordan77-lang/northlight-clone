@@ -266,7 +266,7 @@
         },
         {
             "type": "video",
-            "src": "waves.mp4",
+            "src": "water.mp4",
             "alt": "",
             "volume": 0.5,
             "wall": "Wall13",
@@ -288,7 +288,7 @@
         },
         {
             "type": "video",
-            "src": "ed.mp4",
+            "src": "botanika.mp4",
             "alt": "",
             "volume": 0.5,
             "wall": "Wall10",
@@ -297,7 +297,7 @@
                 "y": -5,
                 "z": 0
             },
-            "opacity": 0.6,
+            "opacity": 0.54,
             "rotation": {
                 "x": -1.5,
                 "y": 180,

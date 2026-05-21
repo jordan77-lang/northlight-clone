@@ -1109,7 +1109,8 @@
             else if(child.name=="Wall2"){
                 planeMesh.position.z += .53;
                 planeMesh.position.x -= .05;
-                planeMesh.scale.set(1,1,1);
+                planeMesh.rotation.y += 0.01;
+                planeMesh.scale.set(1.02,1,1);
             }
             else if(child.name=="Wall8"){
                 planeMesh.position.z -= .2;

@@ -1058,6 +1058,9 @@
             else if(child.name=="Wall8"){
                 planeMesh.position.z -= .2;
             }
+            else if(child.name=="Wall9"){
+                planeMesh.scale.set(.8,1,1);
+            }
             else if(child.name=="Wall10"){
                 planeMesh.position.x += .05;
                 planeMesh.position.z += .5;
@@ -1083,12 +1086,29 @@
             }
             else if(child.name=="Wall16"){
                 planeMesh.position.x -= .4;
-            }
-            else if(child.name=="Wall6"){
-                planeMesh.position.x -= .4;
                 planeMesh.scale.set(1.02,1,1);
             }
             scene.add(planeMesh);
+        }
+
+        function addWallBox(child, mat) {
+            child.updateWorldMatrix(true, false);
+            child.visible = false;
+
+            const bbox   = new THREE.Box3().setFromObject(child);
+            const size   = bbox.getSize(new THREE.Vector3());
+            const center = bbox.getCenter(new THREE.Vector3());
+
+            const boxMat = mat.clone();
+            if (modelClippingPlane) {
+                boxMat.clippingPlanes = [...(boxMat.clippingPlanes || []), modelClippingPlane];
+            }
+            const boxMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(size.x, size.y, size.z),
+                boxMat
+            );
+            boxMesh.position.copy(center);
+            scene.add(boxMesh);
         }
 
         function createBrickFacade(width = 10, height = 10, depth = 0.5) {
@@ -1888,6 +1908,9 @@
                         child.visible = false;
                     } else if (child.name === 'Wall3' || child.name === 'Wall4' || child.name === 'Wall5') {
                         child.visible = false;
+                    } else if (child.name === 'Wall7' || child.name === 'Wall8' || child.name === 'Wall9') {
+                        child.material = whiteMaterial;
+                        addWallPlanes(child, wallpaperMaterial);
                     } else if (child.name === 'Wall11') {
                         child.material = whiteMaterial;
                         addWallPlanes(child, wallpaperMaterial);
@@ -1895,7 +1918,7 @@
                     else if (child.name === 'Wall16') {
                         child.material = whiteMaterial;
                         addWallPlanes(child, wallpaperMaterial);
-                    } else if (name.includes('door') && name.includes('wall16')) {
+                    } else if (name.includes('door')/* && name.includes('wall16')*/) {
                         child.visible = false;
                     } else if (name.includes('door')) {
                         child.material = yellowMaterial;
@@ -1923,6 +1946,7 @@
         let debugLabelsGroup = new THREE.Group();
         scene.add(debugLabelsGroup);
         let debugMode = false;
+        const manualWalls = []; // Wall20, Wall21, … added programmatically
         
         function createTextTexture(text) {
             const canvas = document.createElement('canvas');
@@ -1955,6 +1979,14 @@
         function updateDebugLabels(model) {
             debugLabelsGroup.clear();
             if (!debugMode) return;
+
+            // Label manually-added walls (Wall20, Wall21, …)
+            for (const wall of manualWalls) {
+                const bbox = new THREE.Box3().setFromObject(wall);
+                const center = bbox.getCenter(new THREE.Vector3());
+                center.y += 16;
+                debugLabelsGroup.add(createLabel(center, 'Wall: ' + wall.name));
+            }
             
             model.traverse((child) => {
                 if (child.isMesh) {
@@ -2454,6 +2486,36 @@
         scene.add(rightFacade);
         addObjectCollider(rightFacade);
 
+        // ── Manual walls ─────────────────────────────────────────────────────
+        // Adjust position / rotation / scale below to place each wall.
+        (function addManualWalls() {
+            const wallMat = wallpaperMaterial.clone();
+
+            const wall20 = new THREE.Mesh(new THREE.BoxGeometry(65, 30, 4), wallMat.clone());
+            wall20.name = 'Wall20';
+            wall20.position.set(7, 13, -87);  
+            wall20.rotation.set(0, 0, 0);    
+            scene.add(wall20);
+            addObjectCollider(wall20);
+            manualWalls.push(wall20);
+
+            const wall21 = new THREE.Mesh(new THREE.BoxGeometry(42, 30, 3.4), wallMat.clone());
+            wall21.name = 'Wall21';
+            wall21.position.set(-4, 13, -110);   // ← adjust
+            wall21.rotation.set(0, 90 * Math.PI / 180, 0);     // ← adjust
+            scene.add(wall21);
+            addObjectCollider(wall21);
+            manualWalls.push(wall21);
+
+
+             const wallHidden = new THREE.Mesh(new THREE.BoxGeometry(64.5, 0.3, 8.4), wallMat.clone());
+            wallHidden.name = 'WallHidden';
+            wallHidden.position.set(-11, 27, -19);  
+            wallHidden.rotation.set(0, 0, 0);    
+            scene.add(wallHidden);
+        })();
+        // ─────────────────────────────────────────────────────────────────────
+
         // Hide loading and start
         document.getElementById('loading').style.display = 'none';
         loadShow();
@@ -2468,7 +2530,11 @@
         }
 
         function getWallMesh(wallName) {
-            if (!wallName || wallName === 'none' || !modelScene) return null;
+            if (!wallName || wallName === 'none') return null;
+            // Check manually-added walls (Wall20, Wall21, …) first
+            const manual = manualWalls.find(w => w.name === wallName);
+            if (manual) return manual;
+            if (!modelScene) return null;
             let wallMesh = null;
             modelScene.traverse(child => { if (child.name === wallName) wallMesh = child; });
             return wallMesh;
@@ -2497,9 +2563,14 @@
             const size = bbox.getSize(new THREE.Vector3());
             
             const minAxis = size.x < size.z ? 'x' : 'z';
-            const inwardSign = minAxis === 'x'
+            const autoSign = minAxis === 'x'
                 ? (center.x > 0 ? -1 : 1)
                 : (center.z > 0 ? -1 : 1);
+            // item.face: 1 = default inward face, -1 = opposite face
+            // Some walls default to the opposite face (e.g. Wall20 faces outward by default)
+            const wallFaceDefaults = { Wall20: -1, Wall21: -1 };
+            const effectiveFace = item.face !== undefined ? item.face : (wallFaceDefaults[item.wall] ?? 1);
+            const inwardSign = (effectiveFace === -1) ? -autoSign : autoSign;
             
             if (minAxis === 'x') {
                 object.rotation.y = inwardSign > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -2762,7 +2833,8 @@
 
             // ── TV GLB ────────────────────────────────────────────────────────
             // Always load the shared TV model; path is relative to the show folder.
-            gltfLoader.load('shows/' + showTitle + '/../../building/tv.glb', (gltf) => {
+            const tvGlb = item.type === 'tvalt' ? 'tvalt.glb' : 'tv.glb';
+            gltfLoader.load('shows/' + showTitle + '/../../building/' + tvGlb, (gltf) => {
                 const model = gltf.scene;
                 model.scale.set(item.scale.x, item.scale.y, item.scale.z);
                 applyGLBMaterials(model, false);
@@ -2836,7 +2908,7 @@
                             addModelToScene(item, showTitle);
                         } else if (item.type === 'video') {
                             addVideoToScene(item, showTitle);
-                        } else if (item.type === 'tv') {
+                        } else if (item.type === 'tv' || item.type === 'tvalt') {
                             addTvToScene(item, showTitle);
                         }
                     });

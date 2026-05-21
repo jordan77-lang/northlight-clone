@@ -12,7 +12,7 @@
             "position": {
                 "x": 20,
                 "y": -6.3,
-                "z": 0.03
+                "z": -0.03
             },
             "rotation": {
                 "x": 0,
@@ -22,7 +22,7 @@
             "scale": {
                 "x": 0.009,
                 "y": 0.009,
-                "z": 0.0002
+                "z": 1
             }
         },
         {
@@ -268,11 +268,11 @@
             "videoRotation": { "x": 0, "y": 180, "z": 0 }
         },
         {
-            "type": "tv",
+            "type": "tvalt",
             "src": "calaboca.mp4",
             "alt": "",
             "volume": 0.5,
-            "wall": "Wall14",
+            "wall": "Wall21",
             "position": {
                 "x": 1,
                 "y": 0.1,
@@ -313,8 +313,29 @@
                 "y": 2,
                 "z": 2
             }
+        },
+        {
+            "type": "image",
+            "src": "mRoomImg3.png",
+            "frame": "aluminum",
+            "alt": "",
+            "wall": "Wall20",
+            "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.01,
+                "y": 0.01,
+                "z": 0.01
+            }
         }
-        
     ],
     "furniture": [
         

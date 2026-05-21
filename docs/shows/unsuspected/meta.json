@@ -260,23 +260,24 @@
                 "z": 0
             },
             "scale": {
-                "x": 17,
-                "y": 16,
-                "z": 10
+                "x": 21,
+                "y": 22,
+                "z": 15
             },
-            "videoOffset": { "x": 0, "y": 0.2, "z": -1 },
-            "videoRotation": { "x": 0, "y": 180, "z": 0 }
+            "videoOffset": { "x": 0, "y": 0.2, "z": -1.32 },
+            "videoRotation": { "x": 0, "y": 180, "z": 0 },
+            "videoScale": { "x": 0.95, "y": 0.85, "z": 1 }
         },
         {
             "type": "tvalt",
             "src": "calaboca.mp4",
             "alt": "",
-            "volume": 0.5,
+            "volume": 0.3,
             "wall": "Wall21",
             "position": {
-                "x": -1,
-                "y": 0.1,
-                "z": 0
+                "x": 0,
+                "y": -1,
+                "z": 9
             },
             "rotation": {
                 "x": 0,
@@ -284,12 +285,13 @@
                 "z": 0
             },
             "scale": {
-                "x": 17,
-                "y": 12.2,
-                "z": 10
+                "x": 15,
+                "y": 12,
+                "z": 8
             },
             "videoOffset": { "x": -0.02, "y": 0, "z": 0 },
-            "videoRotation": { "x": 0, "y": 180, "z": 0 }
+            "videoRotation": { "x": 0, "y": 180, "z": 0 },
+            "videoScale": { "x": 1, "y": 1, "z": 1 }
         },
         {
             "type": "video",

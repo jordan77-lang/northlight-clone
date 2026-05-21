@@ -2896,6 +2896,7 @@
                 applyGLBMaterials(model, false);
                 positionOnWall(model, item);
                 scene.add(model);
+                addObjectCollider(model);
 
                 // Derive the video plane world position: project the TV model's
                 // AABB onto its screen normal to find the front-face centre.
@@ -2932,8 +2933,25 @@
                     plane.rotation.z += (item.videoRotation.z || 0) * DEG2RAD;
                 }
 
-                const vs = item.videoScale || 1;
-                plane.scale.setScalar(vs);
+                const vsRaw = item.videoScale ?? 1;
+                const vsX = (typeof vsRaw === 'object') ? (vsRaw.x ?? 1) : vsRaw;
+                const vsY = (typeof vsRaw === 'object') ? (vsRaw.y ?? 1) : vsRaw;
+                const vsZ = (typeof vsRaw === 'object') ? (vsRaw.z ?? 1) : vsRaw;
+                // Auto-fit the video plane to the TV model's face dimensions so it
+                // scales correctly at any item.scale, including non-uniform values.
+                const bboxSize = bbox.getSize(new THREE.Vector3());
+                const nx = Math.abs(screenNormal.x);
+                const ny = Math.abs(screenNormal.y);
+                const nz = Math.abs(screenNormal.z);
+                let screenWidth, screenHeight;
+                if (nz >= nx && nz >= ny) {
+                    screenWidth = bboxSize.x; screenHeight = bboxSize.y;
+                } else if (nx >= ny) {
+                    screenWidth = bboxSize.z; screenHeight = bboxSize.y;
+                } else {
+                    screenWidth = bboxSize.x; screenHeight = bboxSize.z;
+                }
+                plane.scale.set(screenWidth / vw * vsX, screenHeight / vh * vsY, vsZ);
 
                 scene.add(plane);
                 console.log('Added TV to scene:', item.src);

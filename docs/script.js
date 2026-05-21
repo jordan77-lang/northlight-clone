@@ -178,11 +178,11 @@
                 
                 controlsInfo.innerHTML = `
                     <p><strong>Explore Mode Controls:</strong></p>
-                    <p>Left Drag &mdash; Orbit</p>
-                    <p>Right / Middle Drag &mdash; Pan</p>
-                    <p>Shift + Drag &mdash; Pan</p>
-                    <p>Scroll &mdash; Zoom</p>
-                    <p>1-finger &mdash; Orbit &nbsp; 2-finger &mdash; Pan + Zoom</p>
+                    <p>Left Drag  :  Orbit</p>
+                    <p>Right / Middle Drag  :  Pan</p>
+                    <p>Shift + Drag  :  Pan</p>
+                    <p>Scroll  :  Zoom</p>
+                    <p>1-finger  :  Orbit &nbsp; 2-finger  :  Pan + Zoom</p>
                 `;
                 walkDebugGroup.visible = false;
                 if (roofGroup) roofGroup.visible = false;

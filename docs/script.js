@@ -1150,7 +1150,6 @@
             }
             else if(child.name=="Wall16"){
                 planeMesh.position.x -= .4;
-                planeMesh.scale.set(1.02,1,1);
             }
             scene.add(planeMesh);
         }

@@ -1155,26 +1155,6 @@
             scene.add(planeMesh);
         }
 
-        function addWallBox(child, mat) {
-            child.updateWorldMatrix(true, false);
-            child.visible = false;
-
-            const bbox   = new THREE.Box3().setFromObject(child);
-            const size   = bbox.getSize(new THREE.Vector3());
-            const center = bbox.getCenter(new THREE.Vector3());
-
-            const boxMat = mat.clone();
-            if (modelClippingPlane) {
-                boxMat.clippingPlanes = [...(boxMat.clippingPlanes || []), modelClippingPlane];
-            }
-            const boxMesh = new THREE.Mesh(
-                new THREE.BoxGeometry(size.x, size.y, size.z),
-                boxMat
-            );
-            boxMesh.position.copy(center);
-            scene.add(boxMesh);
-        }
-
         function createBrickFacade(width = 10, height = 10, depth = 0.5) {
             // Create a thin box (sheet) with brick on outside and wall texture on inside
             const geometry = new THREE.BoxGeometry(width, height, depth);
@@ -1296,17 +1276,6 @@
                     child.castShadow = true;  // Enable shadow casting
                     child.receiveShadow = true;  // Enable shadow receiving
                     
-                }
-            });
-        }
-
-        // Apply roughClayTexture to all meshes (for pedestals)
-        function applyPedestalMaterial(object) {
-            object.traverse((child) => {
-                if (child.isMesh) {
-                    child.material = pedestalMaterial;
-                    child.castShadow = true;  // Enable shadow casting
-                    child.receiveShadow = true;  // Enable shadow receiving
                 }
             });
         }

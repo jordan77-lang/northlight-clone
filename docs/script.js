@@ -182,7 +182,8 @@
                     <p>Right / Middle Drag  :  Pan</p>
                     <p>Shift + Drag  :  Pan</p>
                     <p>Scroll  :  Zoom</p>
-                    <p>1-finger  :  Orbit &nbsp; 2-finger  :  Pan + Zoom</p>
+                    <p> Touch: </p>
+                    <p>&nbsp; 1-finger  :  Orbit <br>&nbsp; 2-finger  :  Pan + Zoom</p>
                 `;
                 walkDebugGroup.visible = false;
                 if (roofGroup) roofGroup.visible = false;

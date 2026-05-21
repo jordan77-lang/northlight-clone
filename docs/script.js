@@ -519,7 +519,7 @@
         });
 
         // Exterior ground
-        const concreteFloorTexture = textureLoader.load('./building/concrete.png');
+        const concreteFloorTexture = textureLoader.load('./building/concrete.jpg');
         concreteFloorTexture.wrapS = THREE.RepeatWrapping;
         concreteFloorTexture.wrapT = THREE.RepeatWrapping;
         concreteFloorTexture.repeat.set(1, 2);
@@ -1071,7 +1071,97 @@
             map: satinTexture,
             side: THREE.DoubleSide
         });
-        
+
+        // Procedural canvas/fabric weave roughness map — used by the 'fabric' frame type
+        function createFabricWeaveTexture() {
+            const size = 512;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            // Mid-grey base (roughness map)
+            ctx.fillStyle = '#999';
+            ctx.fillRect(0, 0, size, size);
+            const tw = 6, gap = 6; // scaled with canvas (was 3/3 at 256)
+            // Warp threads (vertical)
+            for (let x = 0; x < size; x += tw + gap) {
+                ctx.fillStyle = 'rgba(40,30,20,0.38)';
+                ctx.fillRect(x, 0, tw, size);
+            }
+            // Weft threads (horizontal)
+            for (let y = 0; y < size; y += tw + gap) {
+                ctx.fillStyle = 'rgba(40,30,20,0.38)';
+                ctx.fillRect(0, y, size, tw);
+            }
+            // Subtle natural noise — density scaled with canvas area
+            for (let i = 0; i < 8000; i++) {
+                const v = Math.random() > 0.5 ? 255 : 0;
+                ctx.fillStyle = `rgba(${v},${v},${v},0.025)`;
+                ctx.fillRect(Math.random() * size, Math.random() * size, 1, 1);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.magFilter = THREE.LinearFilter;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            tex.anisotropy = renderer.capabilities.maxAnisotropy;
+            return tex;
+        }
+        const fabricWeaveTexture = createFabricWeaveTexture();
+
+        // Procedural normal map that gives the fabric surface genuine 3D relief
+        function createFabricNormalMap() {
+            const size = 512;
+            const tw = 12; // thread cycle width in pixels — scaled with canvas (was 6 at 256)
+            // Build a heightfield: cosine bumps per thread axis, plain weave alternation
+            const h = new Float32Array(size * size);
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const tx = (x % tw) / tw;
+                    const ty = (y % tw) / tw;
+                    const warpH = Math.cos(tx * Math.PI * 2) * 0.5 + 0.5;
+                    const weftH = Math.cos(ty * Math.PI * 2) * 0.5 + 0.5;
+                    const warpOn = (Math.floor(x / tw) + Math.floor(y / tw)) % 2 === 0;
+                    h[y * size + x] = warpOn ? warpH * 0.75 + weftH * 0.25
+                                              : warpH * 0.25 + weftH * 0.75;
+                }
+            }
+            // Derive RGB normal map via Sobel filter on the heightfield
+            const canvas2 = document.createElement('canvas');
+            canvas2.width = size; canvas2.height = size;
+            const ctx2 = canvas2.getContext('2d');
+            const img = ctx2.createImageData(size, size);
+            const strength = 6.0; // bump intensity
+            const s = size;
+            const ht = (x, y) => h[((y + s) % s) * s + ((x + s) % s)];
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const dx = (ht(x+1,y-1) + 2*ht(x+1,y) + ht(x+1,y+1))
+                             - (ht(x-1,y-1) + 2*ht(x-1,y) + ht(x-1,y+1));
+                    const dy = (ht(x-1,y+1) + 2*ht(x,y+1) + ht(x+1,y+1))
+                             - (ht(x-1,y-1) + 2*ht(x,y-1) + ht(x+1,y-1));
+                    const nx = -dx * strength;
+                    const ny = -dy * strength;
+                    const nz = 1.0;
+                    const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+                    const i = (y * size + x) * 4;
+                    img.data[i]   = Math.round((nx/len * 0.5 + 0.5) * 255);
+                    img.data[i+1] = Math.round((ny/len * 0.5 + 0.5) * 255);
+                    img.data[i+2] = Math.round((nz/len * 0.5 + 0.5) * 255);
+                    img.data[i+3] = 255;
+                }
+            }
+            ctx2.putImageData(img, 0, 0);
+            const tex = new THREE.CanvasTexture(canvas2);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.magFilter = THREE.LinearFilter;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            tex.anisotropy = renderer.capabilities.maxAnisotropy;
+            return tex;
+        }
+        const fabricNormalTexture = createFabricNormalMap();
+
         const pedestalMaterial = new THREE.MeshStandardMaterial({
             map: pedestalTexture,
             color: 0xffffff,
@@ -2485,24 +2575,125 @@
 
                 // Add frame if specified and not "none"
                 if (item.frame && item.frame !== 'none') {
-                    const frameColors = { aluminum: 0xbec2c8 };
-                    const frameColor = frameColors[item.frame] !== undefined ? frameColors[item.frame] : 0xbec2c8;
-                    const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.85, roughness: 0.25 });
-                    const t = Math.max(w, h) * 0.02;
-                    const d = t * 0.8;
-                    const zo = 0.02;
-                    [
-                        { bw: w + t * 2, bh: t, bx: 0,              by:  h / 2 + t / 2 },
-                        { bw: w + t * 2, bh: t, bx: 0,              by: -h / 2 - t / 2 },
-                        { bw: t,         bh: h, bx: -w / 2 - t / 2, by: 0 },
-                        { bw: t,         bh: h, bx:  w / 2 + t / 2, by: 0 },
-                    ].forEach(({ bw, bh, bx, by }) => {
-                        const bar = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat);
-                        bar.position.set(bx, by, zo);
-                        bar.castShadow = true;  // Enable shadow casting on frame
-                        bar.receiveShadow = true;  // Enable shadow receiving on frame
-                        imageGroup.add(bar);
-                    });
+                    if (item.frame === 'fabric') {
+                        // Draped tapestry: image printed on fabric, hanging from a wall rod
+                        material.roughness = 0.93;
+                        material.metalness = 0.0;
+                        const fabricRepeatX = Math.max(1, w / 12);
+                        const fabricRepeatY = Math.max(1, h / 12);
+                        fabricNormalTexture.repeat.set(fabricRepeatX, fabricRepeatY);
+                        material.normalMap = fabricNormalTexture;
+                        material.normalScale = new THREE.Vector2(0.7, 0.7);
+                        material.needsUpdate = true;
+
+                        // Drape: replace flat plane with a subdivided mesh whose vertices are
+                        // displaced to simulate vertical fabric folds + a gentle forward bow.
+                        // Amplitudes are capped in world space so the fabric never pierces the wall.
+                        const scaleMax = Math.max(item.scale.x, item.scale.y);
+                        const foldAmp = Math.min(w * 0.02,          0.035 / scaleMax);
+                        const bowAmp  = Math.min(Math.max(w, h) * 0.012, 0.020 / scaleMax);
+                        const drapedGeo = new THREE.PlaneGeometry(w, h, 8, 24);
+                        const pos = drapedGeo.attributes.position;
+                        for (let i = 0; i < pos.count; i++) {
+                            const nx = (pos.getX(i) / w) + 0.5;   // 0→1 left to right
+                            const ny = (pos.getY(i) / h) + 0.5;   // 0→1 bottom to top
+                            // Sinusoidal folds run vertically; amplitude tapers slightly toward top
+                            const fold = Math.sin(nx * Math.PI * 5) * foldAmp * (1.0 - ny * 0.25);
+                            // Catenary-style bow: fabric weight pulls centre forward
+                            const bow  = Math.sin(ny * Math.PI) * bowAmp;
+                            pos.setZ(i, fold + bow);
+                        }
+                        pos.needsUpdate = true;
+                        drapedGeo.computeVertexNormals();
+                        plane.geometry.dispose();
+                        plane.geometry = drapedGeo;
+
+                        // Dark wood hanging rod just above the top edge
+                        const rodR = Math.max(w, h) * 0.008;
+                        const rodW = w * 1.06;
+                        const rodMat = new THREE.MeshStandardMaterial({ color: 0x2b1a0b, roughness: 0.72, metalness: 0.05 });
+                        const rod = new THREE.Mesh(new THREE.CylinderGeometry(rodR, rodR, rodW, 10), rodMat);
+                        rod.rotation.z = Math.PI / 2;
+                        rod.position.set(0, h / 2 + rodR, rodR);
+                        rod.castShadow = true;
+                        imageGroup.add(rod);
+                        // Decorative finial knobs at each end of the rod
+                        [-rodW * 0.5, rodW * 0.5].forEach(ex => {
+                            const finial = new THREE.Mesh(new THREE.SphereGeometry(rodR * 1.5, 8, 6), rodMat);
+                            finial.position.set(ex, h / 2 + rodR, rodR);
+                            imageGroup.add(finial);
+                        });
+                    } else if (item.frame.endsWith('.glb')) {
+                        // Custom GLB frame: drop a .glb in the show folder and reference it as "frame".
+                        // Name the mesh that should receive the image "Image" — the code will scale
+                        // the whole GLB so that mesh fits the loaded image dimensions exactly.
+                        plane.visible = false;
+                        gltfLoader.load('shows/' + showTitle + '/' + item.frame, (gltf) => {
+                            let imageMesh = null;
+                            gltf.scene.traverse(child => {
+                                if (child.isMesh) {
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                    if (child.name === 'Image' && !imageMesh) imageMesh = child;
+                                }
+                            });
+                            // Fall back to the first mesh if none is named "Image"
+                            if (!imageMesh) {
+                                gltf.scene.traverse(child => {
+                                    if (child.isMesh && !imageMesh) imageMesh = child;
+                                });
+                            }
+                            if (imageMesh) {
+                                imageMesh.material = material;
+                                // Scale the whole GLB so the "Image" mesh spans w × h
+                                const box = new THREE.Box3().setFromObject(imageMesh);
+                                const meshSize = box.getSize(new THREE.Vector3());
+                                const scaleX = meshSize.x > 0 ? w / meshSize.x : 1;
+                                const scaleY = meshSize.y > 0 ? h / meshSize.y : 1;
+                                gltf.scene.scale.setScalar(Math.min(scaleX, scaleY));
+                            }
+                            imageGroup.add(gltf.scene);
+                            needsRender = true;
+                        });
+                    } else if (item.frame === 'whiteboard') {
+                        // Flat white panel with padding on all sides; image sits flush on front face
+                        material.roughness = 0.18;
+                        material.metalness = 0.4;
+                        material.needsUpdate = true;
+                        const pad  = Math.max(w, h) * 0.04;  // padding on each side
+                        const boxW = w + pad * 2;
+                        const boxH = h + pad * 2;
+                        const boxD = 100;
+                        const scaleMax = Math.max(item.scale.x, item.scale.y);
+                        const panelMat = new THREE.MeshStandardMaterial({ color: 0xf8f8f6, roughness: 0.82, metalness: 0.4 });
+                        const panel = new THREE.Mesh(new THREE.BoxGeometry(boxW, boxH, boxD), panelMat);
+                        panel.castShadow = true;
+                        panel.receiveShadow = true;
+                        panel.position.set(0, 0, -boxD / 2 - boxD * 0.05);
+                        panel.castShadow = true;
+                        panel.receiveShadow = true;
+                        imageGroup.add(panel);
+                    } else {
+                        // Metal frame (aluminum or any future solid-frame type)
+                        const frameColors = { aluminum: 0xbec2c8 };
+                        const frameColor = frameColors[item.frame] !== undefined ? frameColors[item.frame] : 0xbec2c8;
+                        const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.85, roughness: 0.25 });
+                        const t = Math.max(w, h) * 0.02;
+                        const d = t * 0.8;
+                        const zo = 0.02;
+                        [
+                            { bw: w + t * 2, bh: t, bx: 0,              by:  h / 2 + t / 2 },
+                            { bw: w + t * 2, bh: t, bx: 0,              by: -h / 2 - t / 2 },
+                            { bw: t,         bh: h, bx: -w / 2 - t / 2, by: 0 },
+                            { bw: t,         bh: h, bx:  w / 2 + t / 2, by: 0 },
+                        ].forEach(({ bw, bh, bx, by }) => {
+                            const bar = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat);
+                            bar.position.set(bx, by, zo);
+                            bar.castShadow = true;
+                            bar.receiveShadow = true;
+                            imageGroup.add(bar);
+                        });
+                    }
                 }
 
                 needsRender = true;

@@ -337,7 +337,88 @@
             }
         }
     ],
-    "furniture": [
-        
-    ]
+"furniture": [
+    {
+        "type": "pedestal",
+        "position": { "x": -40, "y": -3, "z": 7 },
+        "size": { "w": 5, "h": 9, "d": 9 },
+        "rotation": { "y": 0 },
+        "book": 2
+    },
+    {
+        "type": "pedestal",
+        "position": { "x": 24, "y": -3, "z": 12 },
+        "size": { "w": 6, "h": 9, "d": 5 },
+        "rotation": { "y": 0 },
+        "book": 1
+    },
+    {
+        "type": "pedestal",
+        "position": { "x": -15, "y": -4, "z": -84 },
+        "size": { "w": 5, "h": 9, "d": 3 },
+        "rotation": { "y": 0 }
+    },
+    {
+        "type": "pedestal",
+        "position": { "x": -5, "y": -4, "z": -56 },
+        "size": { "w": 5, "h": 9, "d": 6 },
+        "rotation": { "y": 45 }
+    },
+    {
+        "model": "table",
+        "food": true,
+        "position": { "x": -24, "y": 0, "z": 27 },
+        "rotation": { "x": 0, "y": 0, "z": 0 },
+        "scale": { "x": 30, "y": 30, "z": 30 }
+    },
+    {
+        "model": "sofa",
+        "position": { "x": 8, "y": 2, "z": 28 },
+        "rotation": { "x": 0, "y": 90, "z": 0 },
+        "scale": { "x": 15, "y": 15, "z": 15 }
+    },
+    {
+        "model": "table2",
+        "position": { "x": 18, "y": -0.1, "z": 29 },
+        "rotation": { "x": 0, "y": 0, "z": 0 },
+        "scale": { "x": 6, "y": 6, "z": 6 }
+    },
+    {
+        "model": "table2",
+        "position": { "x": 25, "y": -0.1, "z": 29 },
+        "rotation": { "x": 0, "y": 0, "z": 0 },
+        "scale": { "x": 6, "y": 6, "z": 6 }
+    },
+    {
+        "model": "sofa2",
+        "position": { "x": 21, "y": 1.9, "z": 39 },
+        "rotation": { "x": 0, "y": 180, "z": 0 },
+        "scale": { "x": 17, "y": 17, "z": 17 }
+    },
+    {
+        "model": "mSeat",
+        "position": { "x": 15, "y": 0.1, "z": -41 },
+        "rotation": { "x": 0, "y": 45, "z": 0 },
+        "scale": { "x": 12, "y": 12, "z": 12 }
+    },
+    {
+        "model": "mSeat",
+        "position": { "x": 11, "y": 0.1, "z": -45 },
+        "rotation": { "x": 0, "y": 225, "z": 0 },
+        "scale": { "x": 12, "y": 12, "z": 12 }
+    },
+    {
+        "model": "b1Seat",
+        "position": { "x": -25, "y": -0.1, "z": -115 },
+        "rotation": { "x": 0, "y": 45, "z": 0 },
+        "scale": { "x": 7, "y": 7, "z": 7 }
+    },
+    {
+        "model": "b2Seat",
+        "position": { "x": 20, "y": -0.1, "z": -115 },
+        "rotation": { "x": 0, "y": 225, "z": 0 },
+        "scale": { "x": 8, "y": 8, "z": 8 }
+    }
+]
+
 }

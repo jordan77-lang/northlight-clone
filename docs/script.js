@@ -253,11 +253,6 @@
                 _placementQueue[key]();
                 delete _placementQueue[key];
             }
-            // Non-GLB pedestals (always available, placed once main model is ready)
-            addSqPedestalToScene();
-            addRecPedestalToScene();
-            addM2PedestalToScene();
-            addM1PedestalToScene();
             needsRender = true;
         }
         
@@ -369,9 +364,13 @@
                 onLoad: () => addBook2ToScene()
             }
         };
-        
-        // Load all configured models
+
+        // Keys that are part of the building and always loaded regardless of meta.json
+        const buildingModelKeys = new Set(['window', 'frontDoor', 'backdoor']);
+
+        // Load only building-essential models at startup
         for (const [key, config] of Object.entries(modelConfigs)) {
+            if (!buildingModelKeys.has(key)) continue;
             loadModel(key, config.path, {
                 scale: config.scale || 10,
                 position: config.position || [0, 0, 0],
@@ -379,6 +378,62 @@
                 materialFn: config.materialFn,
                 onLoad: config.onLoad
             });
+        }
+
+        // Accumulates placement callbacks for furniture models that are still loading.
+        // Multiple entries for the same key (e.g. two mSeat instances) are all kept.
+        const _pendingFurniturePlacements = {};
+        let _furnitureInstanceCounter = 0;
+
+        // Called from loadShow() for each entry in meta.furniture.
+        // item must have: model (key), position {x,y,z}, rotation {x,y,z} (degrees), scale {x,y,z} or number.
+        function loadFurnitureModel(item) {
+            const key = item.model;
+            const config = modelConfigs[key];
+            if (!config) { console.warn('Unknown furniture model:', key); return; }
+            const DEG2RAD = Math.PI / 180;
+
+            const placeInstance = () => {
+                const clone = models[key].clone();
+                if (item.position) clone.position.set(item.position.x ?? 0, item.position.y ?? 0, item.position.z ?? 0);
+                if (item.rotation) clone.rotation.set(
+                    (item.rotation.x ?? 0) * DEG2RAD,
+                    (item.rotation.y ?? 0) * DEG2RAD,
+                    (item.rotation.z ?? 0) * DEG2RAD
+                );
+                if (item.scale != null) {
+                    if (typeof item.scale === 'number') clone.scale.setScalar(item.scale);
+                    else clone.scale.set(item.scale.x ?? 1, item.scale.y ?? 1, item.scale.z ?? 1);
+                }
+                applyGLBMaterials(clone, false);
+                scene.add(clone);
+                if (item.collider !== false) addObjectCollider(clone);
+                if (key === 'table' && item.food === true) addTableFoodToScene(clone);
+                needsRender = true;
+                console.log('Placed furniture instance:', key);
+            };
+
+            if (models[key]) {
+                // Model already in memory — place immediately (or queue until main scene is ready)
+                registerPlacement('furniture_' + key + '_' + (++_furnitureInstanceCounter), placeInstance);
+            } else {
+                // First request for this model: start loading and accumulate all instances
+                if (!_pendingFurniturePlacements[key]) {
+                    _pendingFurniturePlacements[key] = [];
+                    loadModel(key, config.path, {
+                        scale: config.scale || 10,
+                        position: config.position || [0, 0, 0],
+                        rotation: config.rotation || [0, 0, 0],
+                        materialFn: config.materialFn,
+                        onLoad: () => {
+                            const fns = _pendingFurniturePlacements[key] || [];
+                            delete _pendingFurniturePlacements[key];
+                            fns.forEach(fn => fn());
+                        }
+                    });
+                }
+                _pendingFurniturePlacements[key].push(placeInstance);
+            }
         }
 
         // =====================================================
@@ -2913,6 +2968,41 @@
                             addTvToScene(item, showTitle);
                         }
                     });
+
+                    // Load furniture models and pedestals declared in meta.json
+                    if (Array.isArray(meta.furniture)) {
+                        meta.furniture.forEach(item => {
+                            if (item.model) loadFurnitureModel(item);
+                            else if (item.type === 'pedestal') {
+                                const DEG2RAD = Math.PI / 180;
+                                const p = item.position || {};
+                                const s = item.size || {};
+                                const rotY = ((item.rotation && item.rotation.y) || 0) * DEG2RAD;
+                                makePedestal(
+                                    p.x ?? 0, p.y ?? 0, p.z ?? 0,
+                                    s.w ?? 5,  s.h ?? 9,  s.d ?? 5,
+                                    rotY || undefined
+                                );
+                                // Optional book on top: 1 = book1, 2 = book2, 0/none = no book
+                                const bookNum = item.book;
+                                if (bookNum && bookNum !== 'none' && bookNum !== 0) {
+                                    const bookKey = 'book' + bookNum;
+                                    const bookDefaults = {
+                                        book1: { scale: { x: 6, y: 6, z: 6 }, rotation: { x: 0, y: 2.87, z: 0 } },
+                                        book2: { scale: { x: 7, y: 7, z: 7 }, rotation: { x: 0, y: 270, z: 0 } }
+                                    };
+                                    const bd = bookDefaults[bookKey] || { scale: { x: 6, y: 6, z: 6 }, rotation: { x: 0, y: 0, z: 0 } };
+                                    loadFurnitureModel({
+                                        model: bookKey,
+                                        position: { x: p.x ?? 0, y: (p.y ?? 0) + (s.h ?? 9) + 0.4, z: p.z ?? 0 },
+                                        rotation: bd.rotation,
+                                        scale: bd.scale,
+                                        collider: false
+                                    });
+                                }
+                            }
+                        });
+                    }
                 })
                 .catch(error => {
                     console.error('Error loading show meta:', error);

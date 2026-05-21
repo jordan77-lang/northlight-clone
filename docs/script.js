@@ -58,7 +58,9 @@
                 const cx = (wall.min.x + wall.max.x) / 2;
                 const cy = (wall.min.y + wall.max.y) / 2;
                 const cz = (wall.min.z + wall.max.z) / 2;
-                const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d));
+                const srcGeo = new THREE.BoxGeometry(w, h, d);
+                const edges = new THREE.EdgesGeometry(srcGeo);
+                srcGeo.dispose();
                 const box = new THREE.LineSegments(edges, redMat.clone());
                 box.position.set(cx, cy, cz);
                 walkDebugGroup.add(box);
@@ -212,8 +214,6 @@
         let lastExploreMousePos = new THREE.Vector2(0, 0);
         let isExploreRightClick = false;
 
-        document.body.appendChild(renderer.domElement);
-
         // Load the Northlight 3D model
         const gltfLoader = new GLTFLoader();
         const textureLoader = new THREE.TextureLoader();
@@ -316,28 +316,23 @@
             },
             table: {
                 path: './building/table.glb',
-                scale: 12,
-                onLoad: () => addTableToScene()
+                scale: 12
             },
             sofa: {
                 path: './building/sofa.glb',
-                scale: 10,
-                onLoad: () => addSofaToScene()
+                scale: 10
             },
             table2: {
                 path: './building/table2.glb',
-                scale: 10,
-                onLoad: () => addTable2ToScene()
+                scale: 10
             },
             sofa2: {
                 path: './building/sofa2.glb',
-                scale: 10,
-                onLoad: () => addSofa2ToScene()
+                scale: 10
             },
             mSeat: {
                 path: './building/mSeat.glb',
-                scale: 10,
-                onLoad: () => addMSeatToScene()
+                scale: 10
             },
             backdoor: {
                 path: './building/backdoor.glb',
@@ -347,21 +342,17 @@
             },
             b1Seat: {
                 path: './building/b1Seat.glb',
-                scale: 7,
-                onLoad: () => addB1SeatToScene()
+                scale: 7
             },
             b2Seat: {
                 path: './building/b2Seat.glb',
-                scale: 10,
-                onLoad: () => addB2SeatToScene()
+                scale: 10
             },
             book1: {
-                path: './building/book1.glb',
-                onLoad: () => addBook1ToScene()
+                path: './building/book1.glb'
             },
             book2: {
-                path: './building/book2.glb',
-                onLoad: () => addBook2ToScene()
+                path: './building/book2.glb'
             }
         };
 
@@ -1317,25 +1308,6 @@
             });
         }
 
-        function addTableToScene() {
-            if (!models.table) {
-                console.warn('Table model not loaded yet');
-                return;
-            }
-
-            // Clone and add the table model to the scene
-            const clonedTable = models.table.clone();
-            clonedTable.position.set(-24, 0, 27);
-            clonedTable.scale.set(30, 30, 30);
-            
-            applyGLBMaterials(clonedTable);
-            scene.add(clonedTable);
-            addObjectCollider(clonedTable);
-            console.log('Added table model to scene');
-
-            addTableFoodToScene(clonedTable);
-        }
-
         // =====================================================
         // PROCEDURAL FOOD ITEMS FOR TABLE
         // =====================================================
@@ -1710,66 +1682,6 @@
             console.log('Added procedural food items to table');
         }
 
-        function addSofaToScene() {
-            if (!models.sofa) {
-                console.warn('Sofa model not loaded yet');
-                return;
-            }
-
-            // Clone and add the sofa model to the scene
-            const clonedSofa = models.sofa.clone();
-            clonedSofa.position.set(8, 2, 28);
-            clonedSofa.scale.set(15, 15, 15);
-            clonedSofa.rotation.y = 90 * (Math.PI / 180); // Rotate 90 degrees to fit the corner
-            
-            applyGLBMaterials(clonedSofa);
-            scene.add(clonedSofa);
-            addObjectCollider(clonedSofa);
-            console.log('Added sofa model to scene');
-        }
-
-        function addTable2ToScene() {
-            if (!models.table2) {
-                console.warn('Table2 model not loaded yet');
-                return;
-            }
-
-            // Clone and add the table2 model to the scene
-            const clonedTable2 = models.table2.clone();
-            clonedTable2.position.set(18, -0.1, 29);
-            clonedTable2.scale.set(6, 6, 6);
-            
-            applyGLBMaterials(clonedTable2);
-            scene.add(clonedTable2);
-            addObjectCollider(clonedTable2);
-
-            const clonedTable21 = models.table2.clone();
-            clonedTable21.position.set(25, -0.1, 29);
-            clonedTable21.scale.set(6, 6, 6);
-            applyGLBMaterials(clonedTable21);
-            scene.add(clonedTable21);
-            addObjectCollider(clonedTable21);
-            console.log('Added table2 model to scene');
-        }
-
-        function addSofa2ToScene() {
-            if (!models.sofa2) {
-                console.warn('Sofa2 model not loaded yet');
-                return;
-            }
-
-            // Clone and add the sofa2 model to the scene
-            const clonedSofa2 = models.sofa2.clone();
-            clonedSofa2.position.set(21, 1.9, 39);
-            clonedSofa2.scale.set(17, 17, 17);
-            clonedSofa2.rotation.y = Math.PI; // Rotate 180 degrees to fit the opposite corner
-            
-            applyGLBMaterials(clonedSofa2);
-            scene.add(clonedSofa2);
-            addObjectCollider(clonedSofa2);
-            console.log('Added sofa2 model to scene');
-        }
-
         function makePedestal(x, y, z, w, h, d, rotY) {
             const mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(w, h, d),
@@ -1779,52 +1691,6 @@
             if (rotY) mesh.rotation.y = rotY;
             scene.add(mesh);
             addObjectCollider(mesh);
-        }
-
-        function addSqPedestalToScene() {
-            makePedestal(-40, -3, 7,  5, 9, 9);
-            console.log('Added sqPedestal to scene');
-        }
-
-        function addRecPedestalToScene() {
-            makePedestal(24, -3, 12,  6, 9, 5);
-            console.log('Added recPedestal to scene');
-        }
-
-        function addM2PedestalToScene() {
-            makePedestal(-15, -4, -84,  5, 9, 3);
-            console.log('Added m2Pedestal to scene');
-        }
-
-        function addM1PedestalToScene() {
-            makePedestal(-5, -4, -56,  5, 9, 6,  Math.PI / 4);
-            console.log('Added m1Pedestal to scene');
-        }
-
-        function addMSeatToScene() {
-            if (!models.mSeat) {
-                console.warn('mSeat model not loaded yet');
-                return;
-            }
-
-            // Clone and add the mSeat model to the scene
-            const clonedMSeat = models.mSeat.clone();
-            clonedMSeat.position.set(15, 0.1, -41);
-            clonedMSeat.rotation.y = 45 * (Math.PI / 180); // Rotate 45 degrees for better angle
-            clonedMSeat.scale.set(12, 12, 12);
-            
-            applyGLBMaterials(clonedMSeat);
-            scene.add(clonedMSeat);
-            addObjectCollider(clonedMSeat);
-
-            const clonedMSeat1 = models.mSeat.clone();
-            clonedMSeat1.position.set(11, 0.1, -45);
-            clonedMSeat1.rotation.y = 225 * (Math.PI / 180);
-            clonedMSeat1.scale.set(12, 12, 12);
-            applyGLBMaterials(clonedMSeat1);
-            scene.add(clonedMSeat1);
-            addObjectCollider(clonedMSeat1);
-            console.log('Added mSeat model to scene');
         }
 
         function addBackdoorToScene() {
@@ -1843,67 +1709,6 @@
             scene.add(clonedBackdoor);
             console.log('Added backdoor model to scene');
         }
-
-        function addB1SeatToScene() {
-            if (!models.b1Seat) {
-                console.warn('b1Seat model not loaded yet');
-                return;
-            }
-
-            // Clone and add the b1Seat model to the scene
-            const clonedB1Seat = models.b1Seat.clone();
-            clonedB1Seat.position.set(-25, -0.1, -115);
-            clonedB1Seat.rotation.y = 45 * (Math.PI / 180);
-            clonedB1Seat.scale.set(7, 7, 7);
-            
-            applyGLBMaterials(clonedB1Seat);
-            scene.add(clonedB1Seat);
-            addObjectCollider(clonedB1Seat);
-            console.log('Added b1Seat model to scene');
-        }
-
-        function addB2SeatToScene() {
-            if (!models.b2Seat) {
-                console.warn('b2Seat model not loaded yet');
-                return;
-            }
-
-            // Clone and add the b2Seat model to the scene
-            const clonedB2Seat = models.b2Seat.clone();
-            clonedB2Seat.position.set(20, -0.1, -115);
-            clonedB2Seat.rotation.y = 225 * (Math.PI / 180);
-            clonedB2Seat.scale.set(8, 8, 8);
-            
-            applyGLBMaterials(clonedB2Seat);
-            scene.add(clonedB2Seat);
-            addObjectCollider(clonedB2Seat);
-            console.log('Added b2Seat model to scene');
-        }
-
-        function addBook1ToScene() {
-            if (!models.book1) { console.warn('book1 model not loaded yet'); return; }
-            const cloned = models.book1.clone();
-            cloned.scale.set(6, 6, 6);
-            cloned.position.set(24, 6.4, 12);
-            cloned.rotation.y = 0.05;
-            applyGLBMaterials(cloned);
-            scene.add(cloned);
-            addObjectCollider(cloned);
-            console.log('Added book1 model to scene');
-        }
-
-        function addBook2ToScene() {
-            if (!models.book2) { console.warn('book2 model not loaded yet'); return; }
-            const cloned = models.book2.clone();
-            cloned.scale.set(7, 7, 7);
-            cloned.position.set(-40, 6.4, 7);
-            cloned.rotation.y = Math.PI /180 * 270
-            applyGLBMaterials(cloned);
-            scene.add(cloned);
-            addObjectCollider(cloned);
-            console.log('Added book2 model to scene');
-        }
-
 
         function replaceWindowsWithModel(model) {
             if (!models.window) {
@@ -2589,7 +2394,6 @@
         // Hide loading and start
         document.getElementById('loading').style.display = 'none';
         loadShow();
-        animate();
 
         // =====================================================
         // SHOW LOADING FUNCTIONS
@@ -2668,7 +2472,7 @@
            // plane.receiveShadow = true;  // Enable shadow receiving
             imageGroup.add(plane);
 
-            new THREE.TextureLoader().load('shows/' + showTitle + '/' + item.src, (tex) => {
+            textureLoader.load('shows/' + showTitle + '/' + item.src, (tex) => {
                 const imgW = tex.image.naturalWidth || tex.image.width;
                 const imgH = tex.image.naturalHeight || tex.image.height;
                 const aspect = imgW / imgH;
@@ -2904,7 +2708,7 @@
             // ── TV GLB ────────────────────────────────────────────────────────
             // Always load the shared TV model; path is relative to the show folder.
             const tvGlb = item.type === 'tvalt' ? 'tvalt.glb' : 'tv.glb';
-            gltfLoader.load('shows/' + showTitle + '/../../building/' + tvGlb, (gltf) => {
+            gltfLoader.load('./building/' + tvGlb, (gltf) => {
                 const model = gltf.scene;
                 model.scale.set(item.scale.x, item.scale.y, item.scale.z);
                 applyGLBMaterials(model, false);

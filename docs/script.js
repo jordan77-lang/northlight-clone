@@ -178,10 +178,11 @@
                 
                 controlsInfo.innerHTML = `
                     <p><strong>Explore Mode Controls:</strong></p>
-                    <p>Mouse Drag - Rotate</p>
-                    <p>Shift + Drag - Pan</p>
-                    <p>Scroll / Pinch - Zoom</p>
-                    <p>Two-finger Drag - Rotate (touch)</p>\
+                    <p>Left Drag &mdash; Orbit</p>
+                    <p>Right / Middle Drag &mdash; Pan</p>
+                    <p>Shift + Drag &mdash; Pan</p>
+                    <p>Scroll &mdash; Zoom</p>
+                    <p>1-finger &mdash; Orbit &nbsp; 2-finger &mdash; Pan + Zoom</p>
                 `;
                 walkDebugGroup.visible = false;
                 if (roofGroup) roofGroup.visible = false;
@@ -210,9 +211,9 @@
         // Explore mode camera state
         let exploreCameraDistance = 70;
         let exploreCameraPan = new THREE.Vector2(0, 0);
+        let exploreCameraPanY = 0;
         let exploreRotation = new THREE.Vector2(0.5, 0.5);
         let lastExploreMousePos = new THREE.Vector2(0, 0);
-        let isExploreRightClick = false;
 
         // Load the Northlight 3D model
         const gltfLoader = new GLTFLoader();
@@ -1970,21 +1971,33 @@
                 pendingDY += event.movementY;
                 needsRender = true;
             } else {
-                // Explore mode: rotate by default, shift+drag to pan
-                if (event.buttons === 1) {
+                // Explore mode: left drag = orbit, right/middle/shift = pan
+                const isPan = event.buttons === 2 || event.buttons === 4 ||
+                              (event.buttons === 1 && event.shiftKey);
+                const isOrbit = event.buttons === 1 && !event.shiftKey;
+                if (isPan || isOrbit) {
                     const dx = event.clientX - lastExploreMousePos.x;
                     const dy = event.clientY - lastExploreMousePos.y;
-                    
-                    if (event.shiftKey) {
-                        // Shift + drag - pan
-                        exploreCameraPan.x -= dx * 0.02;
-                        exploreCameraPan.y += dy * 0.02;
+                    if (isPan) {
+                        // Screen-space pan: move orbit target in camera's right/up plane
+                        const phi   = exploreRotation.x;
+                        const theta = exploreRotation.y;
+                        const panScale = exploreCameraDistance * 0.0012;
+                        // Camera right in world space: (cos θ, 0, -sin θ)
+                        const rX =  Math.cos(theta);
+                        const rZ = -Math.sin(theta);
+                        // Camera up in world space: (-sin θ sin φ, cos φ, -cos θ sin φ)
+                        const uX = -Math.sin(theta) * Math.sin(phi);
+                        const uY =  Math.cos(phi);
+                        const uZ = -Math.cos(theta) * Math.sin(phi);
+                        exploreCameraPan.x  -= (rX * dx - uX * dy) * panScale;
+                        exploreCameraPanY   += uY * dy * panScale;
+                        exploreCameraPan.y  -= (rZ * dx - uZ * dy) * panScale;
                     } else {
-                        // Default drag - rotate around object
+                        // Orbit: rotate around target
                         exploreRotation.x += dy * 0.005;
                         exploreRotation.y += dx * 0.005;
-                        // Restrict to top hemisphere (0 to ~90 degrees)
-                        exploreRotation.x = Math.max(0, Math.min(1.4, exploreRotation.x));
+                        exploreRotation.x = Math.max(-0.2, Math.min(Math.PI / 2 * 0.97, exploreRotation.x));
                     }
                     needsRender = true;
                 }
@@ -1992,12 +2005,16 @@
             }
         });
         
+        document.addEventListener('contextmenu', (event) => {
+            if (currentMode === 'explore') event.preventDefault();
+        });
+
         document.addEventListener('wheel', (event) => {
             if (currentMode === 'explore') {
                 event.preventDefault();
-                const zoomSpeed = 20;
-                exploreCameraDistance += event.deltaY * 0.01 * zoomSpeed;
-                exploreCameraDistance = Math.max(5, Math.min(200, exploreCameraDistance));
+                // Proportional zoom — same relative speed at any distance
+                exploreCameraDistance *= 1 + event.deltaY * 0.001;
+                exploreCameraDistance = Math.max(5, Math.min(300, exploreCameraDistance));
                 needsRender = true;
             }
         }, { passive: false });
@@ -2011,47 +2028,51 @@
             event.preventDefault();
             
             if (event.touches.length === 2) {
-                // Two-finger touch - rotate and pinch to zoom
+                // Two-finger: pinch to zoom + drag to pan
                 const touch1 = event.touches[0];
                 const touch2 = event.touches[1];
                 const midX = (touch1.clientX + touch2.clientX) / 2;
                 const midY = (touch1.clientY + touch2.clientY) / 2;
-                
-                // Calculate distance for pinch zoom
+
                 const currentDistance = Math.hypot(
                     touch2.clientX - touch1.clientX,
                     touch2.clientY - touch1.clientY
                 );
-                
+
                 if (lastTouchDistance > 0) {
-                    const distanceDelta = lastTouchDistance - currentDistance;
-                    exploreCameraDistance += distanceDelta * 0.1;
-                    exploreCameraDistance = Math.max(5, Math.min(200, exploreCameraDistance));
+                    // Proportional pinch zoom
+                    exploreCameraDistance *= lastTouchDistance / currentDistance;
+                    exploreCameraDistance = Math.max(5, Math.min(300, exploreCameraDistance));
                 }
                 lastTouchDistance = currentDistance;
-                
-                // Rotate based on movement
-                const deltaMove = new THREE.Vector2(
-                    midX - lastTouchPos.x,
-                    midY - lastTouchPos.y
-                );
-                
-                exploreRotation.x += deltaMove.y * 0.005;
-                exploreRotation.y += deltaMove.x * 0.005;
-                // Restrict to top hemisphere (0 to ~90 degrees)
-                exploreRotation.x = Math.max(0, Math.min(1.4, exploreRotation.x));
+
+                // Two-finger drag = pan (screen-space)
+                const phi   = exploreRotation.x;
+                const theta = exploreRotation.y;
+                const dx = midX - lastTouchPos.x;
+                const dy = midY - lastTouchPos.y;
+                const panScale = exploreCameraDistance * 0.0012;
+                const rX =  Math.cos(theta);
+                const rZ = -Math.sin(theta);
+                const uX = -Math.sin(theta) * Math.sin(phi);
+                const uY =  Math.cos(phi);
+                const uZ = -Math.cos(theta) * Math.sin(phi);
+                exploreCameraPan.x  -= (rX * dx - uX * dy) * panScale;
+                exploreCameraPanY   += uY * dy * panScale;
+                exploreCameraPan.y  -= (rZ * dx - uZ * dy) * panScale;
+
                 lastTouchPos.set(midX, midY);
                 needsRender = true;
             } else if (event.touches.length === 1) {
-                // Single finger - pan with shift-like behavior
+                // Single finger = orbit
                 const touch = event.touches[0];
                 const deltaMove = new THREE.Vector2(
                     touch.clientX - lastTouchPos.x,
                     touch.clientY - lastTouchPos.y
                 );
-                
-                exploreCameraPan.x -= deltaMove.x * 0.02;
-                exploreCameraPan.y += deltaMove.y * 0.02;
+                exploreRotation.x += deltaMove.y * 0.005;
+                exploreRotation.y += deltaMove.x * 0.005;
+                exploreRotation.x = Math.max(-0.2, Math.min(Math.PI / 2 * 0.97, exploreRotation.x));
                 lastTouchPos.set(touch.clientX, touch.clientY);
                 needsRender = true;
             }
@@ -2212,7 +2233,7 @@
             } else {
                 // Explore mode: orbit camera around center
                 const centerX = exploreCameraPan.x;
-                const centerY = 5; // Look at around eye height
+                const centerY = 5 + exploreCameraPanY;
                 const centerZ = exploreCameraPan.y;
                 
                 const x = centerX + Math.sin(exploreRotation.y) * Math.cos(exploreRotation.x) * exploreCameraDistance;

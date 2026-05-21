@@ -532,7 +532,8 @@
             map: concreteFloorTexture,
             color: 0xcccccc,  // Brighter for better lighting
             roughness: 0.7,  // Slightly less rough for realism
-            metalness: 0.0
+            metalness: 0.0,
+            side: THREE.DoubleSide
         });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;

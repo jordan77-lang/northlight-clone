@@ -418,6 +418,14 @@
         "position": { "x": 20, "y": -0.1, "z": -115 },
         "rotation": { "x": 0, "y": 225, "z": 0 },
         "scale": { "x": 8, "y": 8, "z": 8 }
+    },
+    {
+        "model": "custom",
+        "src": "myModel.glb",
+        "position": { "x": 0, "y": 0, "z": -10 },
+        "rotation": { "x": 0, "y": 90, "z": 0 },
+        "scale": { "x": 5, "y": 5, "z": 5 },
+        "collider": false
     }
 ]
 

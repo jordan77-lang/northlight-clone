@@ -386,12 +386,24 @@
         let _furnitureInstanceCounter = 0;
 
         // Called from loadShow() for each entry in meta.furniture.
-        // item must have: model (key), position {x,y,z}, rotation {x,y,z} (degrees), scale {x,y,z} or number.
-        function loadFurnitureModel(item) {
-            const key = item.model;
-            const config = modelConfigs[key];
-            if (!config) { console.warn('Unknown furniture model:', key); return; }
+        // item must have: model (key) — use "custom" + src for show-relative GLBs.
+        // item.collider: true (default) = add collision, false = skip.
+        function loadFurnitureModel(item, showTitle) {
+            const isCustom = item.model === 'custom';
+            const key = isCustom ? ('__custom__' + item.src) : item.model;
             const DEG2RAD = Math.PI / 180;
+
+            // Resolve path: "custom" uses show-relative src, otherwise look up modelConfigs
+            let glbPath;
+            let modelConfig = null;
+            if (isCustom) {
+                if (!item.src) { console.warn('Custom furniture item missing src:', item); return; }
+                glbPath = 'shows/' + showTitle + '/' + item.src;
+            } else {
+                modelConfig = modelConfigs[item.model];
+                if (!modelConfig) { console.warn('Unknown furniture model:', item.model); return; }
+                glbPath = modelConfig.path;
+            }
 
             const placeInstance = () => {
                 const clone = models[key].clone();
@@ -420,11 +432,12 @@
                 // First request for this model: start loading and accumulate all instances
                 if (!_pendingFurniturePlacements[key]) {
                     _pendingFurniturePlacements[key] = [];
-                    loadModel(key, config.path, {
-                        scale: config.scale || 10,
-                        position: config.position || [0, 0, 0],
-                        rotation: config.rotation || [0, 0, 0],
-                        materialFn: config.materialFn,
+                    const cfg = modelConfig || {};
+                    loadModel(key, glbPath, {
+                        scale: cfg.scale || 1,
+                        position: cfg.position || [0, 0, 0],
+                        rotation: cfg.rotation || [0, 0, 0],
+                        materialFn: cfg.materialFn,
                         onLoad: () => {
                             const fns = _pendingFurniturePlacements[key] || [];
                             delete _pendingFurniturePlacements[key];
@@ -2973,7 +2986,7 @@
                     // Load furniture models and pedestals declared in meta.json
                     if (Array.isArray(meta.furniture)) {
                         meta.furniture.forEach(item => {
-                            if (item.model) loadFurnitureModel(item);
+                            if (item.model) loadFurnitureModel(item, showTitle);
                             else if (item.type === 'pedestal') {
                                 const DEG2RAD = Math.PI / 180;
                                 const p = item.position || {};
@@ -2999,7 +3012,7 @@
                                         rotation: bd.rotation,
                                         scale: bd.scale,
                                         collider: false
-                                    });
+                                    }, showTitle);
                                 }
                             }
                         });

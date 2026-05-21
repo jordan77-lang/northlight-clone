@@ -366,8 +366,8 @@
     },
     {
         "model": "table",
-        "food": true,
-        "position": { "x": -24, "y": 0, "z": 27 },
+        "food": false,
+        "position": { "x": -26, "y": 0, "z": 27 },
         "rotation": { "x": 0, "y": 0, "z": 0 },
         "scale": { "x": 30, "y": 30, "z": 30 }
     },

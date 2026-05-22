@@ -2377,8 +2377,16 @@
                 if (moveState.backward) moveStep += moveSpeed * delta * 60;
                 
                 if (moveStep !== 0) {
-                    const nextX = camera.position.x + Math.sin(yaw) * moveStep;
-                    const nextZ = camera.position.z + Math.cos(yaw) * moveStep;
+                    // In XR, use the headset's actual facing direction for locomotion
+                    // so WASD/joystick always moves where you are looking.
+                    let moveYaw = yaw;
+                    if (renderer.xr.isPresenting) {
+                        const _xrDir = new THREE.Vector3();
+                        renderer.xr.getCamera().getWorldDirection(_xrDir);
+                        moveYaw = Math.atan2(_xrDir.x, _xrDir.z);
+                    }
+                    const nextX = camera.position.x + Math.sin(moveYaw) * moveStep;
+                    const nextZ = camera.position.z + Math.cos(moveYaw) * moveStep;
                     
                     // Check collision before moving
                     if (!checkCollision(nextX, nextZ)) {
@@ -2388,15 +2396,37 @@
                     }
                 }
                 
-                // Turn left/right
+                // Turn left/right (in XR, head rotation handles look; A/D strafe instead)
                 if (moveState.left) {
-                    yaw += turnSpeed * delta * 60;
-                    turned = true;
+                    if (renderer.xr.isPresenting) {
+                        // Strafe left in XR
+                        let moveYaw = yaw;
+                        const _xrDir = new THREE.Vector3();
+                        renderer.xr.getCamera().getWorldDirection(_xrDir);
+                        moveYaw = Math.atan2(_xrDir.x, _xrDir.z);
+                        const strafeYaw = moveYaw + Math.PI / 2;
+                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60;
+                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60;
+                        if (!checkCollision(nx, nz)) { camera.position.x = nx; camera.position.z = nz; }
+                    } else {
+                        yaw += turnSpeed * delta * 60;
+                        turned = true;
+                    }
                     needsRender = true;
                 }
                 if (moveState.right) {
-                    yaw -= turnSpeed * delta * 60;
-                    turned = true;
+                    if (renderer.xr.isPresenting) {
+                        // Strafe right in XR
+                        const _xrDir = new THREE.Vector3();
+                        renderer.xr.getCamera().getWorldDirection(_xrDir);
+                        const strafeYaw = Math.atan2(_xrDir.x, _xrDir.z) - Math.PI / 2;
+                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60;
+                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60;
+                        if (!checkCollision(nx, nz)) { camera.position.x = nx; camera.position.z = nz; }
+                    } else {
+                        yaw -= turnSpeed * delta * 60;
+                        turned = true;
+                    }
                     needsRender = true;
                 }
                 

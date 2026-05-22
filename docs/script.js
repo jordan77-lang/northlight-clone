@@ -3000,6 +3000,7 @@
             positionOnWall(imageGroup, item);
             imageGroup.scale.set(item.scale.x, item.scale.y, item.scale.z);
             scene.add(imageGroup);
+            if (item.collider === true) addObjectCollider(imageGroup);
             addItemLight(imageGroup);
             console.log('Added image to scene:', item.src);
         }

@@ -2248,6 +2248,9 @@
             right: false,
             xrTap: false   // phone WebXR tap-to-walk
         };
+        // Per-frame XR thumbstick state — reset each frame so releasing the
+        // stick immediately stops movement. Kept separate from keyboard moveState.
+        const xrStickState = { forward: false, backward: false, left: false, right: false, axisX: 0, axisY: 0 };
 
         document.addEventListener('keydown', (event) => {
             if (currentMode === 'game') {
@@ -2476,8 +2479,14 @@
                 let turned = false;
                 
                 // Forward/backward movement in facing direction
-                if (moveState.forward) moveStep -= moveSpeed * delta * 60;
-                if (moveState.backward) moveStep += moveSpeed * delta * 60;
+                const fwd  = moveState.forward  || xrStickState.forward;
+                const bwd  = moveState.backward || xrStickState.backward;
+                const lft  = moveState.left     || xrStickState.left;
+                const rgt  = moveState.right    || xrStickState.right;
+                // Analog speed: proportional to stick deflection (1.0 when fully pushed)
+                const stickMag = Math.min(1, Math.abs(xrStickState.axisY) > 0.18 ? Math.abs(xrStickState.axisY) : 1);
+                if (fwd)  moveStep -= moveSpeed * delta * 60 * stickMag;
+                if (bwd)  moveStep += moveSpeed * delta * 60 * stickMag;
                 
                 if (moveStep !== 0) {
                     // In XR, use the headset's actual facing direction for locomotion
@@ -2500,7 +2509,7 @@
                 }
                 
                 // Turn left/right (in XR, head rotation handles look; A/D strafe instead)
-                if (moveState.left) {
+                if (lft) {
                     if (renderer.xr.isPresenting) {
                         // Strafe left in XR
                         let moveYaw = yaw;
@@ -2508,8 +2517,9 @@
                         renderer.xr.getCamera().getWorldDirection(_xrDir);
                         moveYaw = Math.atan2(_xrDir.x, _xrDir.z);
                         const strafeYaw = moveYaw + Math.PI / 2;
-                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60;
-                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60;
+                        const strafeMag = Math.min(1, Math.abs(xrStickState.axisX) > 0.18 ? Math.abs(xrStickState.axisX) : 1);
+                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60 * strafeMag;
+                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60 * strafeMag;
                         if (!checkCollision(nx, nz)) { camera.position.x = nx; camera.position.z = nz; }
                     } else {
                         yaw += turnSpeed * delta * 60;
@@ -2517,14 +2527,15 @@
                     }
                     needsRender = true;
                 }
-                if (moveState.right) {
+                if (rgt) {
                     if (renderer.xr.isPresenting) {
                         // Strafe right in XR
                         const _xrDir = new THREE.Vector3();
                         renderer.xr.getCamera().getWorldDirection(_xrDir);
+                        const strafeMag = Math.min(1, Math.abs(xrStickState.axisX) > 0.18 ? Math.abs(xrStickState.axisX) : 1);
                         const strafeYaw = Math.atan2(_xrDir.x, _xrDir.z) - Math.PI / 2;
-                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60;
-                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60;
+                        const nx = camera.position.x + Math.sin(strafeYaw) * moveSpeed * delta * 60 * strafeMag;
+                        const nz = camera.position.z + Math.cos(strafeYaw) * moveSpeed * delta * 60 * strafeMag;
                         if (!checkCollision(nx, nz)) { camera.position.x = nx; camera.position.z = nz; }
                     } else {
                         yaw -= turnSpeed * delta * 60;
@@ -2626,26 +2637,47 @@
 
             if (currentMode === 'game') {
                 // ── XR controller thumbstick input ─────────────────────────────
-                // Reads the left-hand thumbstick (axes 2 & 3, xr-standard mapping).
-                // Works on Meta Quest, Pico, and most WebXR-compatible controllers.
-                // Keyboard (WASD / Bluetooth) state is preserved — thumbstick ORs in.
+                // xrStickState is reset every frame then repopulated from axes so
+                // releasing the stick immediately stops movement (no stuck-key bug).
+                // Keyboard / BT state lives in moveState and is unaffected.
+                xrStickState.forward  = false;
+                xrStickState.backward = false;
+                xrStickState.left     = false;
+                xrStickState.right    = false;
+                xrStickState.axisX    = 0;
+                xrStickState.axisY    = 0;
                 if (renderer.xr.isPresenting) {
                     const session = renderer.xr.getSession();
-                    const DEAD = 0.18; // deadzone
+                    const DEAD = 0.18;
                     for (const src of session.inputSources) {
                         if (!src.gamepad) continue;
+                        // Prefer left-hand controller for locomotion
+                        if (src.handedness === 'right') continue;
                         const axes = src.gamepad.axes;
-                        // Primary thumbstick: axes[2]=X, axes[3]=Y (xr-standard)
-                        // Fallback to axes[0]/[1] for controllers without a second stick
+                        // xr-standard: axes[2]=thumbstick X, axes[3]=thumbstick Y
+                        // Fallback to axes[0]/[1] for simpler controllers
                         const ax = axes.length > 3 ? axes[2] : (axes[0] ?? 0);
                         const ay = axes.length > 3 ? axes[3] : (axes[1] ?? 0);
-                        if (ay < -DEAD) moveState.forward  = true;
-                        if (ay >  DEAD) moveState.backward = true;
-                        if (ax < -DEAD) moveState.left     = true;
-                        if (ax >  DEAD) moveState.right    = true;
+                        if (Math.abs(ax) > Math.abs(xrStickState.axisX)) xrStickState.axisX = ax;
+                        if (Math.abs(ay) > Math.abs(xrStickState.axisY)) xrStickState.axisY = ay;
+                        if (ay < -DEAD) xrStickState.forward  = true;
+                        if (ay >  DEAD) xrStickState.backward = true;
+                        if (ax < -DEAD) xrStickState.left     = true;
+                        if (ax >  DEAD) xrStickState.right    = true;
+                    }
+                    // Right thumbstick → look/turn (yaw only in XR since pitch = head)
+                    for (const src of session.inputSources) {
+                        if (!src.gamepad || src.handedness !== 'right') continue;
+                        const axes = src.gamepad.axes;
+                        const ax = axes.length > 3 ? axes[2] : (axes[0] ?? 0);
+                        const LOOK_DEAD = 0.2;
+                        if (Math.abs(ax) > LOOK_DEAD) {
+                            yaw -= ax * turnSpeed * 1.5;
+                            needsRender = true;
+                        }
                     }
                     // Phone WebXR: tap-and-hold on screen = walk forward
-                    if (moveState.xrTap) moveState.forward = true;
+                    if (moveState.xrTap) xrStickState.forward = true;
                 }
                 // ──────────────────────────────────────────────────────────────
 

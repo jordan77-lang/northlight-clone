@@ -2547,7 +2547,7 @@
 
         function addImageToScene(item, showTitle) {
             const imageGroup = new THREE.Group();
-            const material = new THREE.MeshStandardMaterial({ transparent: true, alphaTest: 0.01, metalness: 0.1, roughness: 0.8 });
+            const material = new THREE.MeshStandardMaterial({ transparent: true, alphaTest: 0.01, metalness: 0.1, roughness: 0.8, side: THREE.DoubleSide });
             const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
            // plane.castShadow = true;  // Enable shadow casting
            // plane.receiveShadow = true;  // Enable shadow receiving
@@ -2573,9 +2573,43 @@
                 material.opacity = (item.opacity !== undefined) ? item.opacity : 1;
                 material.needsUpdate = true;
 
-                // Add frame if specified and not "none"
-                if (item.frame && item.frame !== 'none') {
-                    if (item.frame === 'fabric') {
+                // Normalize frame descriptors.
+                // Accepts three forms (all backward-compatible):
+                //   "frame": "aluminum"                   → [{ type:"aluminum" }]
+                //   "frame": "whiteboard, poster1"         → [{ type:"whiteboard" }, { type:"poster1" }]
+                //   "frames": [{ type:"poster1", offset:{x:0,y:0,z:0.1}, rotation:{}, scale:1 }, ...]
+                const DEG2RAD = Math.PI / 180;
+                const frameDescriptors = Array.isArray(item.frames)
+                    ? item.frames
+                    : (item.frame || '').split(',')
+                        .map(f => f.trim())
+                        .filter(f => f && f !== 'none')
+                        .map(f => ({ type: f }));
+
+                for (const fd of frameDescriptors) {
+                    const frame = fd.type || '';
+                    // Each frame gets its own sub-group so per-frame offset/rotation/scale apply
+                    // only to that frame's geometry, not to the image plane itself.
+                    const frameGroup = new THREE.Group();
+                    if (fd.offset) {
+                        // offset is in world units — divide by imageGroup's scale so the
+                        // parent's scale doesn't shrink the value (imageGroup.scale = item.scale).
+                        const isx = (typeof item.scale === 'number') ? item.scale : (item.scale?.x || 1);
+                        const isy = (typeof item.scale === 'number') ? item.scale : (item.scale?.y || 1);
+                        const isz = (typeof item.scale === 'number') ? item.scale : (item.scale?.z || 1);
+                        frameGroup.position.set(
+                            (fd.offset.x ?? 0) / isx,
+                            (fd.offset.y ?? 0) / isy,
+                            (fd.offset.z ?? 0) / isz
+                        );
+                    }
+                    if (fd.rotation) frameGroup.rotation.set((fd.rotation.x ?? 0) * DEG2RAD, (fd.rotation.y ?? 0) * DEG2RAD, (fd.rotation.z ?? 0) * DEG2RAD);
+                    if (fd.scale != null) {
+                        if (typeof fd.scale === 'number') frameGroup.scale.setScalar(fd.scale);
+                        else frameGroup.scale.set(fd.scale.x ?? 1, fd.scale.y ?? 1, fd.scale.z ?? 1);
+                    }
+                    imageGroup.add(frameGroup);
+                    if (frame === 'fabric') {
                         // Draped tapestry: image printed on fabric, hanging from a wall rod
                         material.roughness = 0.93;
                         material.metalness = 0.0;
@@ -2616,19 +2650,19 @@
                         rod.rotation.z = Math.PI / 2;
                         rod.position.set(0, h / 2 + rodR, rodR);
                         rod.castShadow = true;
-                        imageGroup.add(rod);
+                        frameGroup.add(rod);
                         // Decorative finial knobs at each end of the rod
                         [-rodW * 0.5, rodW * 0.5].forEach(ex => {
                             const finial = new THREE.Mesh(new THREE.SphereGeometry(rodR * 1.5, 8, 6), rodMat);
                             finial.position.set(ex, h / 2 + rodR, rodR);
-                            imageGroup.add(finial);
+                            frameGroup.add(finial);
                         });
-                    } else if (item.frame.endsWith('.glb')) {
+                    } else if (frame.endsWith('.glb')) {
                         // Custom GLB frame: drop a .glb in the show folder and reference it as "frame".
                         // Name the mesh that should receive the image "Image" — the code will scale
                         // the whole GLB so that mesh fits the loaded image dimensions exactly.
                         plane.visible = false;
-                        gltfLoader.load('shows/' + showTitle + '/' + item.frame, (gltf) => {
+                        gltfLoader.load('shows/' + showTitle + '/' + frame, (gltf) => {
                             let imageMesh = null;
                             gltf.scene.traverse(child => {
                                 if (child.isMesh) {
@@ -2652,10 +2686,10 @@
                                 const scaleY = meshSize.y > 0 ? h / meshSize.y : 1;
                                 gltf.scene.scale.setScalar(Math.min(scaleX, scaleY));
                             }
-                            imageGroup.add(gltf.scene);
+                            frameGroup.add(gltf.scene);
                             needsRender = true;
                         });
-                    } else if (item.frame === 'whiteboard') {
+                    } else if (frame === 'whiteboard') {
                         // Flat white panel with padding on all sides; image sits flush on front face
                         material.roughness = 0.18;
                         material.metalness = 0.4;
@@ -2664,20 +2698,15 @@
                         const boxW = w + pad * 2;
                         const boxH = h + pad * 2;
                         const boxD = 100;
-                        const scaleMax = Math.max(item.scale.x, item.scale.y);
                         const panelMat = new THREE.MeshStandardMaterial({ color: 0xf8f8f6, roughness: 0.82, metalness: 0.4 });
                         const panel = new THREE.Mesh(new THREE.BoxGeometry(boxW, boxH, boxD), panelMat);
                         panel.castShadow = true;
                         panel.receiveShadow = true;
                         panel.position.set(0, 0, -boxD / 2 - boxD * 0.05);
-                        panel.castShadow = true;
-                        panel.receiveShadow = true;
-                        imageGroup.add(panel);
-                    } else {
-                        // Metal frame (aluminum or any future solid-frame type)
-                        const frameColors = { aluminum: 0xbec2c8 };
-                        const frameColor = frameColors[item.frame] !== undefined ? frameColors[item.frame] : 0xbec2c8;
-                        const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.85, roughness: 0.25 });
+                        frameGroup.add(panel);
+                    } else if (frame === 'aluminum') {
+                        // Metal frame bars around the image
+                        const frameMat = new THREE.MeshStandardMaterial({ color: 0xbec2c8, metalness: 0.85, roughness: 0.25 });
                         const t = Math.max(w, h) * 0.02;
                         const d = t * 0.8;
                         const zo = 0.02;
@@ -2691,7 +2720,47 @@
                             bar.position.set(bx, by, zo);
                             bar.castShadow = true;
                             bar.receiveShadow = true;
-                            imageGroup.add(bar);
+                            frameGroup.add(bar);
+                        });
+                    } else {
+                        // Named building asset: "poster1" → ./building/poster1.glb, etc.
+                        // The mesh named "Image" in the GLB receives the image texture;
+                        // the GLB is scaled so that mesh fits the loaded image dimensions.
+                        plane.visible = false;
+                        gltfLoader.load('./building/' + frame + '.glb', (gltf) => {
+                            let imageMesh = null;
+                            gltf.scene.traverse(child => {
+                                if (child.isMesh) {
+                                    child.castShadow = true;
+                                    child.receiveShadow = true;
+                                    if (child.name === 'Image' && !imageMesh) imageMesh = child;
+                                }
+                            });
+                            if (!imageMesh) {
+                                gltf.scene.traverse(child => {
+                                    if (child.isMesh && !imageMesh) imageMesh = child;
+                                });
+                            }
+                            if (imageMesh) {
+                                imageMesh.material = new THREE.MeshBasicMaterial({
+                                    map: material.map,
+                                    transparent: material.transparent,
+                                    alphaTest: material.alphaTest,
+                                    opacity: material.opacity,
+                                    side: THREE.DoubleSide
+                                });
+                                const box = new THREE.Box3().setFromObject(imageMesh);
+                                const meshSize = box.getSize(new THREE.Vector3());
+                                const scaleX = meshSize.x > 0 ? w / meshSize.x : 1;
+                                const scaleY = meshSize.y > 0 ? h / meshSize.y : 1;
+                                gltf.scene.scale.setScalar(Math.min(scaleX, scaleY));
+                            }
+                            frameGroup.add(gltf.scene);
+                            needsRender = true;
+                        }, undefined, err => {
+                            // GLB not found — fall back to plain image
+                            plane.visible = true;
+                            console.warn('Frame GLB not found: ./building/' + frame + '.glb', err);
                         });
                     }
                 }

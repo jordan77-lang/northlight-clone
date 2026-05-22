@@ -131,9 +131,26 @@
         // Keep camera rig at correct eye height in VR
         renderer.xr.addEventListener('sessionstart', () => {
             needsRender = true;
+            // No pointer lock needed in XR — update the instruction text
+            if (currentMode === 'game') {
+                document.getElementById('controlsInfo').innerHTML =
+                    '<p><strong>Game Mode Controls:</strong></p>' +
+                    '<p>WASD / Arrow Keys — Move</p>' +
+                    '<p>Head movement — Look</p>';
+            }
         });
         renderer.xr.addEventListener('sessionend', () => {
             needsRender = true;
+            // Restore desktop instructions when XR ends
+            if (currentMode === 'game') {
+                document.getElementById('controlsInfo').innerHTML =
+                    '<p><strong>Game Mode Controls:</strong></p>' +
+                    '<p>WASD / Arrow Keys - Move</p>' +
+                    '<p>Mouse - Look around</p>' +
+                    '<p style="color:red;background:white;padding:2px 5px;text-transform:uppercase;">Click anywhere to enable navigation</p>' +
+                    '<p>(press ESC to release mouse lock)</p>';
+                isLocked = false;
+            }
         });
 
         // =====================================================
@@ -2057,7 +2074,10 @@
                     pointerLockReady = true; // first click arms the lock
                     return;
                 }
-                document.body.requestPointerLock();
+                // Don't request pointer lock while an XR session is active
+                if (!renderer.xr.isPresenting) {
+                    document.body.requestPointerLock();
+                }
             }
         });
 
@@ -2075,7 +2095,7 @@
 
         document.addEventListener('mousemove', (event) => {
             if (currentMode === 'game') {
-                if (!isLocked) return;
+                if (!isLocked && !renderer.xr.isPresenting) return;
                 // Ignore movement for 300ms after lock to absorb click/trackpad inertia
                 if (performance.now() - lockAcquiredAt < 300) return;
                 // Accumulate raw (unrounded) deltas — flushed each rAF to avoid jitter
@@ -2279,6 +2299,29 @@
                 }
             }
         });
+
+        // ── WebXR keyboard fallback ───────────────────────────────────────────
+        // When a WebXR session is active (real headset + BT keyboard, or browser
+        // emulator) the emulator extension / XR overlay may swallow keyboard
+        // events in the bubbling phase before they reach the document listener
+        // above.  Registering the same handlers on 'window' with capture:true
+        // fires in the capture phase — before any element or extension handler
+        // can call stopPropagation / stopImmediatePropagation.
+        function _xrKey(down, event) {
+            if (currentMode !== 'game') return;
+            if (!renderer.xr.isPresenting) return; // desktop path uses document listener
+            const v = down;
+            switch (event.code) {
+                case 'ArrowUp':    case 'KeyW': moveState.forward  = v; break;
+                case 'ArrowDown':  case 'KeyS': moveState.backward = v; break;
+                case 'ArrowLeft':  case 'KeyA': moveState.left     = v; break;
+                case 'ArrowRight': case 'KeyD': moveState.right    = v; break;
+            }
+            if (v) needsRender = true;
+        }
+        window.addEventListener('keydown', (e) => _xrKey(true,  e), { capture: true });
+        window.addEventListener('keyup',   (e) => _xrKey(false, e), { capture: true });
+        // ─────────────────────────────────────────────────────────────────────
 
         // Clear movement state when window loses focus to prevent stuck keys
         window.addEventListener('blur', () => {
@@ -2585,13 +2628,10 @@
                 // ── XR controller thumbstick input ─────────────────────────────
                 // Reads the left-hand thumbstick (axes 2 & 3, xr-standard mapping).
                 // Works on Meta Quest, Pico, and most WebXR-compatible controllers.
+                // Keyboard (WASD / Bluetooth) state is preserved — thumbstick ORs in.
                 if (renderer.xr.isPresenting) {
                     const session = renderer.xr.getSession();
                     const DEAD = 0.18; // deadzone
-                    moveState.forward  = false;
-                    moveState.backward = false;
-                    moveState.left     = false;
-                    moveState.right    = false;
                     for (const src of session.inputSources) {
                         if (!src.gamepad) continue;
                         const axes = src.gamepad.axes;

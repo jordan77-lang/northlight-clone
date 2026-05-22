@@ -145,6 +145,51 @@
             touch-action: none;
             user-select: none;
         }
+        /* ── QR code modal ── */
+        #qrModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            z-index: 500;
+            align-items: center;
+            justify-content: center;
+        }
+        #qrBox {
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px 28px;
+            text-align: center;
+            max-width: 320px;
+            width: 90%;
+        }
+        #qrBox h3 {
+            margin-bottom: 12px;
+            font-size: 16px;
+            color: #222;
+        }
+        #qrBox img {
+            width: 220px;
+            height: 220px;
+            display: block;
+            margin: 0 auto 12px;
+            border: 1px solid #ddd;
+        }
+        #qrUrl {
+            font-size: 10px;
+            color: #555;
+            word-break: break-all;
+            margin-bottom: 14px;
+        }
+        #qrClose {
+            padding: 8px 22px;
+            background: #222;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -170,6 +215,16 @@
     </div>
     <div id="vignette"></div>
     <div id="loading">Loading...</div>
+
+    <!-- QR code modal (shown when WebXR is unavailable) -->
+    <div id="qrModal">
+        <div id="qrBox">
+            <h3>Scan to open on an XR device</h3>
+            <img id="qrImg" src="" alt="QR code">
+            <p id="qrUrl"></p>
+            <button id="qrClose" onclick="document.getElementById('qrModal').style.display='none'">Close</button>
+        </div>
+    </div>
 
     <!-- Touch game mode controls -->
     <div id="touchJoystick">

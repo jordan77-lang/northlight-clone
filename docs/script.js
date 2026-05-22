@@ -93,6 +93,41 @@
         vrButton.appendChild(vrButtonInner);
         document.body.appendChild(vrButton);
 
+        // If WebXR immersive-vr is not available, swap the VR button for a
+        // QR code button so the user can transfer the page to an XR-capable device.
+        function installQRFallback() {
+            vrButtonInner.remove();
+            const qrBtn = document.createElement('button');
+            qrBtn.textContent = '\uD83D\uDCF1 Open on XR device';
+            qrBtn.style.cssText = [
+                'padding:12px 20px',
+                'background:rgba(0,0,0,0.75)',
+                'color:#fff',
+                'border:2px solid #888',
+                'border-radius:6px',
+                'font-size:13px',
+                'cursor:pointer',
+                'white-space:nowrap'
+            ].join(';');
+            qrBtn.addEventListener('click', () => {
+                const url = window.location.href;
+                document.getElementById('qrImg').src =
+                    'https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=' +
+                    encodeURIComponent(url);
+                document.getElementById('qrUrl').textContent = url;
+                document.getElementById('qrModal').style.display = 'flex';
+            });
+            vrButton.appendChild(qrBtn);
+        }
+
+        if (navigator.xr) {
+            navigator.xr.isSessionSupported('immersive-vr')
+                .then(supported => { if (!supported) installQRFallback(); })
+                .catch(() => installQRFallback());
+        } else {
+            installQRFallback();
+        }
+
         // Keep camera rig at correct eye height in VR
         renderer.xr.addEventListener('sessionstart', () => {
             needsRender = true;

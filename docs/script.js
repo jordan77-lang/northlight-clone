@@ -550,6 +550,9 @@
             flushPlacements();
             updateDebugLabels(model);
             needsRender = true;
+            // Building walls are now in the scene — safe to place show objects.
+            document.getElementById('loading').style.display = 'none';
+            loadShow();
         }
         
         gltfLoader.load('./building/Northlight.glb', (gltf) => {
@@ -562,6 +565,9 @@
             finalizeModelLoading(model);
         }, undefined, (error) => {
             console.error('Error loading Northlight model:', error);
+            // Still show the page and load the show even without the building GLB
+            document.getElementById('loading').style.display = 'none';
+            loadShow();
         });
 
         // Exterior ground
@@ -2701,9 +2707,7 @@
         })();
         // ─────────────────────────────────────────────────────────────────────
 
-        // Hide loading and start
-        document.getElementById('loading').style.display = 'none';
-        loadShow();
+        // Show content is deferred until the building finishes loading (see finalizeModelLoading).
 
         // =====================================================
         // SHOW LOADING FUNCTIONS

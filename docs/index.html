@@ -102,6 +102,49 @@
             z-index: 50;
             background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%);
         }
+        /* ── Touch joystick ── */
+        #touchJoystick {
+            display: none;
+            position: fixed;
+            bottom: 36px;
+            left: 36px;
+            width: 120px;
+            height: 120px;
+            z-index: 200;
+            touch-action: none;
+            user-select: none;
+        }
+        #touchJoystick .jBase {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.18);
+            border: 2px solid rgba(255,255,255,0.45);
+        }
+        #touchJoystick .jKnob {
+            position: absolute;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.55);
+            border: 2px solid rgba(255,255,255,0.8);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        /* ── Touch look overlay (right 60% of screen) ── */
+        #touchLook {
+            display: none;
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 60%;
+            height: 100%;
+            z-index: 190;
+            touch-action: none;
+            user-select: none;
+        }
     </style>
 </head>
 <body>
@@ -127,6 +170,13 @@
     </div>
     <div id="vignette"></div>
     <div id="loading">Loading...</div>
+
+    <!-- Touch game mode controls -->
+    <div id="touchJoystick">
+        <div class="jBase"></div>
+        <div class="jKnob" id="jKnob"></div>
+    </div>
+    <div id="touchLook"></div>
 
     <script type="importmap">
     {

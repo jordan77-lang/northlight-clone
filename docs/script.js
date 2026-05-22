@@ -130,7 +130,7 @@
         const controlsInfo = document.getElementById('controlsInfo');
         
         if (isMobile) {
-            gameModeBtn.disabled = true;
+            // game mode is allowed on touch — joystick handles navigation
         }
         
         let pointerLockReady = false;
@@ -153,15 +153,23 @@
                 pointerLockReady = false; // require one extra click inside the canvas
                 gameModeBtn.classList.add('active');
                 exploreModeBtn.classList.remove('active');
-                controlsInfo.innerHTML = `
-                    <p><strong>Game Mode Controls:</strong></p>
-                    <p>WASD / Arrow Keys - Move</p>
-                    <p>Mouse - Look around</p>
-                    <p style="color: red; background:white; padding:2px 5px;text-transform: uppercase;">Click anywhere to enable navigation</p>
-                    <p>(press ESC to release mouse lock)</p>
-                `;
-                
-                isLocked = false;
+                controlsInfo.innerHTML = isMobile
+                    ? `<p><strong>Game Mode Controls:</strong></p>
+                       <p>Left joystick — Move</p>
+                       <p>Drag right side — Look</p>`
+                    : `<p><strong>Game Mode Controls:</strong></p>
+                       <p>WASD / Arrow Keys - Move</p>
+                       <p>Mouse - Look around</p>
+                       <p style="color: red; background:white; padding:2px 5px;text-transform: uppercase;">Click anywhere to enable navigation</p>
+                       <p>(press ESC to release mouse lock)</p>`;
+
+                if (isMobile) {
+                    document.getElementById('touchJoystick').style.display = 'block';
+                    document.getElementById('touchLook').style.display = 'block';
+                    isLocked = true; // touch doesn't use pointer lock but movement always active
+                } else {
+                    isLocked = false;
+                }
                 camera.position.set(-4, 5.2, 20);
                 yaw = 0; // Face inward (toward the gallery)
                 pitch = 0;
@@ -175,6 +183,9 @@
             } else {
                 gameModeBtn.classList.remove('active');
                 exploreModeBtn.classList.add('active');
+                document.getElementById('touchJoystick').style.display = 'none';
+                document.getElementById('touchLook').style.display = 'none';
+                if (isMobile) isLocked = false;
                 
                 controlsInfo.innerHTML = `
                     <p><strong>Explore Mode Controls:</strong></p>
@@ -2242,6 +2253,113 @@
                 moveState.right = false;
             }
         });
+
+        // =====================================================
+        // TOUCH JOYSTICK + LOOK (mobile game mode)
+        // =====================================================
+
+        (function setupTouchControls() {
+            const joystickEl   = document.getElementById('touchJoystick');
+            const knobEl       = document.getElementById('jKnob');
+            const lookEl       = document.getElementById('touchLook');
+            const JOYSTICK_R   = 60;    // radius in px — half the 120px base
+
+            // ── Joystick ──────────────────────────────────────────────
+            let jTouchId  = null;
+            let jBaseX    = 0, jBaseY = 0;
+
+            function joystickMove(cx, cy) {
+                let dx = cx - jBaseX;
+                let dy = cy - jBaseY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > JOYSTICK_R) {
+                    dx *= JOYSTICK_R / dist;
+                    dy *= JOYSTICK_R / dist;
+                }
+                // Move knob visually (offset from centre of base element)
+                knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+                const nx = dx / JOYSTICK_R; // −1…1
+                const ny = dy / JOYSTICK_R; // −1…1
+
+                moveState.forward  = ny < -0.3;
+                moveState.backward = ny >  0.3;
+                moveState.left     = nx < -0.3;
+                moveState.right    = nx >  0.3;
+                needsRender = true;
+            }
+
+            function joystickRelease() {
+                jTouchId = null;
+                knobEl.style.transform = 'translate(-50%, -50%)';
+                moveState.forward = moveState.backward = moveState.left = moveState.right = false;
+            }
+
+            joystickEl.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (currentMode !== 'game') return;
+                const t = e.changedTouches[0];
+                jTouchId = t.identifier;
+                const rect = joystickEl.getBoundingClientRect();
+                jBaseX = rect.left + rect.width  / 2;
+                jBaseY = rect.top  + rect.height / 2;
+                joystickMove(t.clientX, t.clientY);
+            }, { passive: false });
+
+            joystickEl.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (currentMode !== 'game') return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === jTouchId) {
+                        joystickMove(t.clientX, t.clientY);
+                    }
+                }
+            }, { passive: false });
+
+            joystickEl.addEventListener('touchend',    (e) => { e.preventDefault(); joystickRelease(); }, { passive: false });
+            joystickEl.addEventListener('touchcancel', (e) => { e.preventDefault(); joystickRelease(); }, { passive: false });
+
+            // ── Look swipe ────────────────────────────────────────────
+            let lTouchId  = null;
+            let lLastX    = 0, lLastY = 0;
+
+            lookEl.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (currentMode !== 'game') return;
+                if (lTouchId !== null) return; // only one look touch at a time
+                const t = e.changedTouches[0];
+                lTouchId = t.identifier;
+                lLastX   = t.clientX;
+                lLastY   = t.clientY;
+            }, { passive: false });
+
+            lookEl.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (currentMode !== 'game') return;
+                for (const t of e.changedTouches) {
+                    if (t.identifier === lTouchId) {
+                        const dx = t.clientX - lLastX;
+                        const dy = t.clientY - lLastY;
+                        lLastX = t.clientX;
+                        lLastY = t.clientY;
+                        // pendingDX/DY are raw pixel deltas (same unit as mouse movementX/Y)
+                        // pointerSpeed in updateCamera converts them to radians
+                        pendingDX += dx;
+                        pendingDY += dy;
+                        needsRender = true;
+                    }
+                }
+            }, { passive: false });
+
+            function lookRelease(e) {
+                e.preventDefault();
+                for (const t of e.changedTouches) {
+                    if (t.identifier === lTouchId) lTouchId = null;
+                }
+            }
+            lookEl.addEventListener('touchend',    lookRelease, { passive: false });
+            lookEl.addEventListener('touchcancel', lookRelease, { passive: false });
+        })();
 
         // =====================================================
         // ANIMATION LOOP

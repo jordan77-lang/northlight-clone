@@ -2184,7 +2184,8 @@
             forward: false,
             backward: false,
             left: false,
-            right: false
+            right: false,
+            xrTap: false   // phone WebXR tap-to-walk
         };
 
         document.addEventListener('keydown', (event) => {
@@ -2362,6 +2363,24 @@
         })();
 
         // =====================================================
+        // PHONE WEBXR — tap screen to walk forward
+        // In phone WebXR (Cardboard-style) the touchscreen is still active.
+        // A tap-and-hold moves the player forward; head movement steers.
+        // =====================================================
+        document.addEventListener('touchstart', (e) => {
+            if (renderer.xr.isPresenting && currentMode === 'game') {
+                moveState.xrTap = true;
+                needsRender = true;
+            }
+        }, { passive: true });
+        document.addEventListener('touchend', () => {
+            if (renderer.xr.isPresenting) moveState.xrTap = false;
+        }, { passive: true });
+        document.addEventListener('touchcancel', () => {
+            if (renderer.xr.isPresenting) moveState.xrTap = false;
+        }, { passive: true });
+
+        // =====================================================
         // ANIMATION LOOP
         // =====================================================
         
@@ -2522,6 +2541,33 @@
             // ──────────────────────────────────────────────────────────────────
 
             if (currentMode === 'game') {
+                // ── XR controller thumbstick input ─────────────────────────────
+                // Reads the left-hand thumbstick (axes 2 & 3, xr-standard mapping).
+                // Works on Meta Quest, Pico, and most WebXR-compatible controllers.
+                if (renderer.xr.isPresenting) {
+                    const session = renderer.xr.getSession();
+                    const DEAD = 0.18; // deadzone
+                    moveState.forward  = false;
+                    moveState.backward = false;
+                    moveState.left     = false;
+                    moveState.right    = false;
+                    for (const src of session.inputSources) {
+                        if (!src.gamepad) continue;
+                        const axes = src.gamepad.axes;
+                        // Primary thumbstick: axes[2]=X, axes[3]=Y (xr-standard)
+                        // Fallback to axes[0]/[1] for controllers without a second stick
+                        const ax = axes.length > 3 ? axes[2] : (axes[0] ?? 0);
+                        const ay = axes.length > 3 ? axes[3] : (axes[1] ?? 0);
+                        if (ay < -DEAD) moveState.forward  = true;
+                        if (ay >  DEAD) moveState.backward = true;
+                        if (ax < -DEAD) moveState.left     = true;
+                        if (ax >  DEAD) moveState.right    = true;
+                    }
+                    // Phone WebXR: tap-and-hold on screen = walk forward
+                    if (moveState.xrTap) moveState.forward = true;
+                }
+                // ──────────────────────────────────────────────────────────────
+
                 if (isLocked || renderer.xr.isPresenting) {
                     // Flush accumulated mouse deltas once per frame (smooth, no rounding jitter)
                     if (pendingDX !== 0 || pendingDY !== 0) {

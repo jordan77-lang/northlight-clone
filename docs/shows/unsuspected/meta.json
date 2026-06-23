@@ -1,4 +1,4 @@
-{
+﻿{
     "id": "unsuspected",
     "title": "Unsuspected",
     "description": "An immersive experience that explores the hidden stories and secrets of Northlight, revealing the unexpected connections and mysteries that lie beneath the surface.",
@@ -228,20 +228,66 @@
             "alt": "",
             "wall": "none",
             "position": {
-                "x": 10,
-                "y": 3,
+                "x": 8,
+                "y": 4,
                 "z": -94
             },
             "rotation": {
                 "x": 0,
-                "y": 176,
+                "y": 156,
                 "z": 0
             },
             "scale": {
-                "x": 12,
-                "y": 12,
-                "z": 12
+                "x": 15,
+                "y": 15,
+                "z": 15
+            },
+            "collider": true
+        }, 
+                {
+            "type": "image",
+            "src": "backImage.png",
+            "alt": "",
+            "frame": "poster1",
+            "wall": "none",
+            "position": {
+                "x": 8.3,
+                "y": 4,
+                "z": -94
+            },
+            "rotation": {
+                "x": 0,
+                "y": 157,
+                "z": 0.1
+            },
+            "scale": {
+                "x": 0.0135,
+                "y": 0.0135,
+                "z": 0.0135
             }
+        }, 
+        {
+            "type": "model",
+            "src": "backModel.glb",
+            "alt": "",
+            "material": "standard",
+            "wall": "none",
+            "position": {
+                "x": 32,
+                "y": 7,
+                "z": -106
+            },
+            "rotation": {
+                "x": 0,
+                "y": 154,
+                "z": 1
+            },
+            "scale": {
+                "x": 21,
+                "y": 21,
+                "z": 21
+            },
+            "collider": true
         },
         {
             "type": "tv",
@@ -250,13 +296,13 @@
             "volume": 0.5,
             "wall": "Wall13",
             "position": {
-                "x": 20,
-                "y": 0,
+                "x": 16,
+                "y": -3,
                 "z": -0.60
             },
             "rotation": {
                 "x": -2.5,
-                "y": 0,
+                "y": -1,
                 "z": 0
             },
             "scale": {
@@ -264,8 +310,10 @@
                 "y": 22,
                 "z": 15
             },
-            "videoOffset": { "x": 0, "y": 0.2, "z": -1.32 },
-            "videoRotation": { "x": 0, "y": 180, "z": 0 },
+            "videoOffset": { "x": 0, "y": 0, "z": -0.05 },
+            "videoOffsetLocal": { "x": 0, "y": 0, "z": 0 },
+            "videoRotation": { "x": 0, "y": 0, "z": 0 },
+            "videoSurfaceOffset": 0,
             "videoScale": { "x": 0.95, "y": 0.85, "z": 1 }
         },
         {
@@ -276,8 +324,8 @@
             "wall": "Wall21",
             "position": {
                 "x": 0,
-                "y": -1,
-                "z": 9
+                "y": -2.3,
+                "z": 11.5
             },
             "rotation": {
                 "x": 0,
@@ -285,13 +333,13 @@
                 "z": 0
             },
             "scale": {
-                "x": 15,
-                "y": 12,
-                "z": 8
+                "x": 14,
+                "y": 13,
+                "z": 10
             },
-            "videoOffset": { "x": -0.02, "y": 0, "z": 0 },
-            "videoRotation": { "x": 0, "y": 180, "z": 0 },
-            "videoScale": { "x": 1, "y": 1, "z": 1 }
+            "videoOffset": { "x": 0, "y": 0, "z": 0 },
+            "videoRotation": { "x": 0, "y": 0, "z": 0 },
+            "videoScale": { "x": 0.9, "y": 0.9, "z": 1 }
         },
         {
             "type": "video",
@@ -299,12 +347,14 @@
             "alt": "",
             "volume": 0.5,
             "wall": "Wall10",
+            "face": 1,
+            "surfaceOffset": 0.35,
             "position": {
                 "x": 0.3,
                 "y": -5,
                 "z": 0
             },
-            "opacity": 0.54,
+            "opacity": 0.85,
             "rotation": {
                 "x": 0,
                 "y": 0,
@@ -318,17 +368,14 @@
         },
         {
             "type": "image",
-            "src": "mRoomImg3.png",
-            "frames": [
-                 { "type": "whiteboard" },
-                 { "type": "poster2", "offset": { "x": 0, "y": -5.5, "z": 0.5 } }
-            ],
+            "src": "bRoom-l.png",
+            "frame": "aluminum",
             "alt": "",
-            "wall": "Wall9",
+            "wall": "Wall7",
             "position": {
-                "x": 10,
-                "y": -7,
-                "z": 0.3
+                "x": 0.2,
+                "y": -6,
+                "z": 5
             },
             "rotation": {
                 "x": 0,
@@ -336,40 +383,232 @@
                 "z": 0
             },
             "scale": {
-                "x": 0.01,
-                "y": 0.01,
-                "z": 0.001
+                "x": 0.012,
+                "y": 0.012,
+                "z": 0.012
+            }
+        },
+        {
+            "type": "image",
+            "src": "bRoom-r.png",
+            "frame": "aluminum",
+            "alt": "",
+            "wall": "Wall7",
+            "position": {
+                "x": 0.2,
+                "y": -6,
+                "z": -12
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.012,
+                "y": 0.012,
+                "z": 0.012
+            }
+        },
+        {
+            "type": "image",
+            "src": "wall9-1.png",
+            "frames": [
+                 { "type": "whiteboard" }
+            ],
+            "alt": "",
+            "wall": "Wall20",
+            "position": {
+                "x": 20,
+                "y": -5,
+                "z": 0
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.012,
+                "y": 0.012,
+                "z": 0.0012
             },
             "collider": true
+        },
+        {
+            "type": "image",
+            "src": "wall9-2.png",
+            "frames": [
+                 { "type": "whiteboard" }
+            ],
+            "alt": "",
+            "wall": "Wall20",
+            "position": {
+                "x": 10,
+                "y": 0,
+                "z": 0
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.005,
+                "y": 0.005,
+                "z": 0.01
+            },
+            "collider": true
+        },
+        {
+            "type": "image",
+            "src": "wall9-3.png",
+            "frames": [
+                 { "type": "whiteboard" }
+            ],
+            "alt": "",
+            "wall": "Wall20",
+            "position": {
+                "x": -2,
+                "y": -10,
+                "z": 0
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.018,
+                "y": 0.018,
+                "z": 0.01
+            },
+            "collider": true
+        },
+        {
+            "type": "image",
+            "src": "wall9-4.png",
+            "frames": [
+                 { "type": "whiteboard" }
+            ],
+            "alt": "",
+            "wall": "Wall20",
+            "position": {
+                "x": -24,
+                "y": -10,
+                "z": 0
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.009,
+                "y": 0.009,
+                "z": 0.01
+            },
+            "collider": true
+        },
+        {
+            "type": "image",
+            "src": "wall13-1.png",
+            "frames": [
+                 { "type": "whiteborder" }
+            ],
+            "alt": "",
+            "wall": "Wall13",
+            "position": {
+                "x": -14,
+                "y": -16.3,
+                "z": -0.2
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.014,
+                "y": 0.014,
+                "z": 0.014
+            },
+            "collider": false
+        },
+        {
+            "type": "image",
+            "src": "wall13-2.png",
+            "frames": [
+                 { "type": "whiteborder" }
+            ],
+            "alt": "",
+            "wall": "Wall13",
+            "position": {
+                "x": -19,
+                "y": -8.3,
+                "z": -0.2
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.014,
+                "y": 0.014,
+                "z": 0.014
+            },
+            "collider": false
+        },
+        {
+            "type": "image",
+            "src": "wall13-3.png",
+            "frames": [
+                 { "type": "whiteborder" }
+            ],
+            "alt": "",
+            "wall": "Wall13",
+            "position": {
+                "x": -6,
+                "y": -7.3,
+                "z": -0.2
+            },
+            "rotation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "scale": {
+                "x": 0.018,
+                "y": 0.018,
+                "z": 0.016
+            },
+            "collider": false
         }
     ],
 "furniture": [
     {
         "type": "pedestal",
-        "name": "SqPedestal",
-        "position": { "x": -40, "y": -3, "z": 7 },
-        "size": { "w": 5, "h": 9, "d": 9 },
+            "id": "SqPedestal",
+        "position": { "x": -40, "y": -2, "z": 7 },
+        "size": { "w": 5, "h": 8, "d": 9 },
         "rotation": { "y": 0 },
         "book": 2
     },
     {
         "type": "pedestal",
-        "position": { "x": 24, "y": -3, "z": 12 },
-        "size": { "w": 6, "h": 9, "d": 5 },
+        "id": "RecPedestal",
+        "position": { "x": 24, "y": -2, "z": 12 },
+        "size": { "w": 6, "h": 8, "d": 5 },
         "rotation": { "y": 0 },
         "book": 1
     },
     {
         "type": "pedestal",
-        "position": { "x": -15, "y": -3, "z": -84 },
-        "size": { "w": 5, "h": 9, "d": 3 },
-        "rotation": { "y": 0 }
-    },
-    {
-        "type": "pedestal",
-        "position": { "x": -5, "y": -3, "z": -56 },
-        "size": { "w": 5, "h": 9, "d": 6 },
-        "rotation": { "y": 45 }
+        "id": "mRoomPedestal",
+        "position": { "x": -5, "y": -2, "z": -56 },
+        "size": { "w": 5, "h": 8, "d": 16 },
+        "rotation": { "y": 90 }
     },
     {
         "model": "table",
@@ -401,38 +640,6 @@
         "position": { "x": 21, "y": 1.9, "z": 39 },
         "rotation": { "x": 0, "y": 180, "z": 0 },
         "scale": { "x": 17, "y": 17, "z": 17 }
-    },
-    {
-        "model": "mSeat",
-        "position": { "x": 15, "y": 0.1, "z": -41 },
-        "rotation": { "x": 0, "y": 45, "z": 0 },
-        "scale": { "x": 12, "y": 12, "z": 12 }
-    },
-    {
-        "model": "mSeat",
-        "position": { "x": 11, "y": 0.1, "z": -45 },
-        "rotation": { "x": 0, "y": 225, "z": 0 },
-        "scale": { "x": 12, "y": 12, "z": 12 }
-    },
-    {
-        "model": "b1Seat",
-        "position": { "x": -25, "y": -0.1, "z": -115 },
-        "rotation": { "x": 0, "y": 45, "z": 0 },
-        "scale": { "x": 7, "y": 7, "z": 7 }
-    },
-    {
-        "model": "b2Seat",
-        "position": { "x": 20, "y": -0.1, "z": -115 },
-        "rotation": { "x": 0, "y": 225, "z": 0 },
-        "scale": { "x": 8, "y": 8, "z": 8 }
-    },
-    {
-        "model": "custom",
-        "src": "myModel.glb",
-        "position": { "x": 0, "y": 0, "z": -10 },
-        "rotation": { "x": 0, "y": 90, "z": 0 },
-        "scale": { "x": 5, "y": 5, "z": 5 },
-        "collider": false
     }
 ]
 

@@ -1,21 +1,15 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
+        import { EXRLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/EXRLoader.js';
         import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js';
-        import { GLTFExporter } from 'https://unpkg.com/three@0.160.0/examples/jsm/exporters/GLTFExporter.js';
         import { RoomEnvironment } from 'https://unpkg.com/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
 
         // Scene setup
         const scene = new THREE.Scene();
         scene.fog = new THREE.Fog(0xb0c4de, 150, 600);  // Atmospheric fog for depth
-/*
-        // Sky sphere — MeshBasicMaterial so it's unaffected by lighting
-        const skyGeo = new THREE.SphereGeometry(650, 32, 16);
-        const skyMat = new THREE.MeshBasicMaterial({ color: 0xb0c4de, side: THREE.BackSide });
-        const skySphere = new THREE.Mesh(skyGeo, skyMat);
-        scene.add(skySphere);
-*/
         // Camera
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.5, 700); // near 0.5 = better Z precision; far 700 = fog ends at 600
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1.0, 700); // larger near plane improves depth precision; far 700 keeps full gallery range
         camera.position.set(0, 5.2, 30);
 
         // Audio listener — must be on camera for positional audio to work
@@ -74,15 +68,41 @@
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;  // Softer, more realistic shadow edges
         renderer.toneMapping = THREE.ACESFilmicToneMapping;  // Cinematic look
-        renderer.toneMappingExposure = 1.0;  // Adjust exposure for mood
+        renderer.toneMappingExposure = 1.12;  // Slightly brighter overall gallery exposure
         renderer.outputColorSpace = THREE.SRGBColorSpace;  // Proper color accuracy
         renderer.dithering = true;  // Eliminate banding in fog/sky gradients — zero cost
         renderer.localClippingEnabled = true;  // Enable local clipping for Y-axis cropping
 
-        // Room environment — free IBL that grounds PBR materials (runs once at load, zero runtime cost)
-        const pmremGenerator = new THREE.PMREMGenerator(renderer);
-        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-        pmremGenerator.dispose();
+        // Environment lighting:
+        // 1) start with a lightweight RoomEnvironment fallback so the scene always has IBL,
+        // 2) then try to replace it with an EXR HDRI if present.
+        const fallbackPmrem = new THREE.PMREMGenerator(renderer);
+        const fallbackEnvRT = fallbackPmrem.fromScene(new RoomEnvironment(), 0.04);
+        scene.environment = fallbackEnvRT.texture;
+        fallbackPmrem.dispose();
+
+        const HDRI_EXR_PATH = './building/HDRI/christmas_photo_studio_02_2k.exr';
+        const exrLoader = new EXRLoader();
+        // Defer HDRI so the building GLB and JPG textures get network priority first.
+        setTimeout(() => {
+            exrLoader.load(
+                HDRI_EXR_PATH,
+                (exrTexture) => {
+                    exrTexture.mapping = THREE.EquirectangularReflectionMapping;
+                    const hdriPmrem = new THREE.PMREMGenerator(renderer);
+                    const hdriEnvRT = hdriPmrem.fromEquirectangular(exrTexture);
+                    scene.environment = hdriEnvRT.texture;
+                    exrTexture.dispose();
+                    hdriPmrem.dispose();
+                    fallbackEnvRT.dispose();
+                    needsRender = true;
+                },
+                undefined,
+                (error) => {
+                    console.warn('EXR HDRI not loaded; using RoomEnvironment fallback:', HDRI_EXR_PATH, error);
+                }
+            );
+        }, 200);
         renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
@@ -150,6 +170,8 @@
                     '<p style="color:red;background:white;padding:2px 5px;text-transform:uppercase;">Click anywhere to enable navigation</p>' +
                     '<p>(press ESC to release mouse lock)</p>';
                 isLocked = false;
+                pointerLockReady = false;
+                pointerLockExitAt = performance.now();
             }
         });
 
@@ -164,6 +186,10 @@
         };
         
         const isMobile = isMobileDevice();
+        const isChromeBrowser = (() => {
+            const ua = navigator.userAgent || '';
+            return /Chrome\/\d+/i.test(ua) && !/Edg\//i.test(ua) && !/OPR\//i.test(ua);
+        })();
         let currentMode = 'explore';
         let needsRender = true;
         let isLocked = false;
@@ -180,12 +206,152 @@
         const gameModeBtn = document.getElementById('gameModeBtn');
         const exploreModeBtn = document.getElementById('exploreModeBtn');
         const controlsInfo = document.getElementById('controlsInfo');
-        
-        if (isMobile) {
-            // game mode is allowed on touch — joystick handles navigation
+        const showSelect = document.getElementById('showSelect');
+        const BLANK_GALLERY_VALUE = '__blank__';
+
+        async function discoverShows() {
+            const discovered = new Set();
+
+            const addShowName = (name) => {
+                if (!name) return;
+                const cleaned = String(name).trim().replace(/^\/+|\/+$/g, '');
+                if (!cleaned || cleaned.includes('/') || cleaned.startsWith('.')) return;
+                discovered.add(cleaned);
+            };
+
+            // Preferred source for production: explicit manifest file.
+            try {
+                const res = await fetch('shows/index.json', { cache: 'no-store' });
+                if (res.ok) {
+                    const list = await res.json();
+                    if (Array.isArray(list)) {
+                        list.forEach(addShowName);
+                    }
+                }
+            } catch (_) {
+                // Fall back to directory listing parsing below.
+            }
+
+            // Dev fallback (e.g. Five Server): parse links from directory listing.
+            if (discovered.size === 0) {
+                try {
+                    const res = await fetch('shows/', { cache: 'no-store' });
+                    if (res.ok) {
+                        const html = await res.text();
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        doc.querySelectorAll('a[href]').forEach((a) => {
+                            const raw = a.getAttribute('href') || '';
+                            const href = raw.split('#')[0].split('?')[0];
+                            if (!href || href === '../' || href === './') return;
+
+                            // Five Server may emit absolute paths; resolve + keep only the leaf folder.
+                            const resolved = new URL(href, window.location.href);
+                            const segments = decodeURIComponent(resolved.pathname)
+                                .split('/')
+                                .filter(Boolean);
+                            const name = segments[segments.length - 1] || '';
+                            addShowName(name);
+                        });
+                    }
+                } catch (_) {
+                    // No directory listing available.
+                }
+            }
+
+            // Keep only folders that actually contain meta.json.
+            const verified = (await Promise.all(
+                [...discovered].map(async (name) => {
+                    try {
+                        const res = await fetch(`shows/${encodeURIComponent(name)}/meta.json`, { cache: 'no-store' });
+                        return res.ok ? name : null;
+                    } catch (_) {
+                        return null;
+                    }
+                })
+            )).filter(Boolean);
+
+            verified.sort((a, b) => a.localeCompare(b));
+            return verified;
         }
+
+        function syncShowSelectWithHash() {
+            if (!showSelect) return;
+            const current = decodeURIComponent(window.location.hash.replace('#', ''));
+            showSelect.value = current || '';
+        }
+
+        async function setupShowSelector() {
+            if (!showSelect) return;
+
+            showSelect.innerHTML = '<option value="">Loading shows...</option>';
+            const shows = await discoverShows();
+
+            showSelect.disabled = false;
+            showSelect.innerHTML = '<option value="">Select a show...</option><option value="__blank__">Blank gallery</option>';
+            for (const show of shows) {
+                const option = document.createElement('option');
+                option.value = show;
+                option.textContent = show;
+                showSelect.appendChild(option);
+            }
+
+            const currentHash = decodeURIComponent(window.location.hash.replace('#', ''));
+            if (currentHash === BLANK_GALLERY_VALUE || (currentHash && shows.includes(currentHash))) {
+                showSelect.value = currentHash;
+            } else if (shows.length > 0) {
+                // Default to first available show so first-time visitors see content.
+                const firstShow = shows[0];
+                showSelect.value = firstShow;
+                window.location.hash = encodeURIComponent(firstShow);
+                if (modelScene) loadShow();
+            } else {
+                // No shows available: keep the selector usable with blank gallery selected.
+                showSelect.value = BLANK_GALLERY_VALUE;
+                window.location.hash = encodeURIComponent(BLANK_GALLERY_VALUE);
+            }
+
+            showSelect.addEventListener('change', () => {
+                const selected = showSelect.value;
+                const current = decodeURIComponent(window.location.hash.replace('#', ''));
+
+                if (!selected) {
+                    if (!current) return;
+                    window.location.hash = '';
+                    window.location.reload();
+                    return;
+                }
+
+                if (selected === current) return;
+
+                // Existing load path appends media; reload ensures a clean scene when switching.
+                window.location.hash = encodeURIComponent(selected);
+                window.location.reload();
+            });
+
+            window.addEventListener('hashchange', syncShowSelectWithHash);
+        }
+
+        setupShowSelector();
         
         let pointerLockReady = false;
+        let pointerLockExitAt = 0;
+
+        function requestGamePointerLock() {
+            if (renderer.xr.isPresenting) return;
+            if (document.pointerLockElement) return;
+            if (performance.now() - pointerLockExitAt < 600) return;
+
+            const lockRequest = document.body.requestPointerLock();
+            if (lockRequest && typeof lockRequest.catch === 'function') {
+                lockRequest.catch((err) => {
+                    // Browsers reject immediate re-lock after ESC; ignore that case.
+                    if (err?.name !== 'SecurityError') {
+                        console.warn('Pointer lock failed:', err);
+                    }
+                });
+            }
+        }
 
         function setMode(mode) {
             currentMode = mode;
@@ -229,6 +395,7 @@
                 camera.quaternion.setFromEuler(spawnEuler);
                 buildWalkDebug();
                 walkDebugGroup.visible = debugMode;
+                ensureFlatRoof();
                 if (roofGroup) roofGroup.visible = true;
                 vrButton.style.display = '';
                 needsRender = true;
@@ -271,6 +438,21 @@
                 needsRender = true;
             }
         });
+
+        const layoutGuideCheckbox = document.getElementById('layoutGuideCheckbox');
+        const layoutGuideHud = document.getElementById('layoutGuideHud');
+        layoutGuideCheckbox.addEventListener('change', (event) => {
+            layoutGuideEnabled = event.target.checked;
+            wallGuideGroup.visible = layoutGuideEnabled;
+            layoutGuideHud.style.display = layoutGuideEnabled ? 'block' : 'none';
+            if (layoutGuideEnabled) {
+                layoutGuideHud.innerHTML = '<strong>Layout Guide</strong><br>Point at a wall grid to read coordinates.';
+            } else {
+                layoutGuideHud.textContent = '';
+            }
+            buildWallPlacementGuides();
+            needsRender = true;
+        });
         
         // Explore mode camera state
         let exploreCameraDistance = 70;
@@ -280,8 +462,61 @@
         let lastExploreMousePos = new THREE.Vector2(0, 0);
 
         // Load the Northlight 3D model
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/gltf/');
+
         const gltfLoader = new GLTFLoader();
-        const textureLoader = new THREE.TextureLoader();
+        gltfLoader.setDRACOLoader(dracoLoader);
+
+        const buildingTextureManager = new THREE.LoadingManager();
+        const textureLoader = new THREE.TextureLoader(buildingTextureManager);
+
+        let pendingNorthlightGltf = null;
+        let buildingTexturesReady = false;
+        let buildingVisualsReady = false;
+        let exteriorFacadesAdded = false;
+
+        function textureHasImage(texture) {
+            const image = texture?.image;
+            return !!(image && (image.width || image.data?.width));
+        }
+
+        function cloneLoadedTexture(texture) {
+            if (!textureHasImage(texture)) return texture;
+            return texture.clone();
+        }
+
+        function tryInitBuilding() {
+            if (buildingVisualsReady || !buildingTexturesReady || !pendingNorthlightGltf) return;
+            buildingVisualsReady = true;
+
+            const model = pendingNorthlightGltf.scene;
+            modelScene = model;
+
+            setupModelTransform(model);
+            createAndApplyClippingPlane(model);
+            processModelMeshes(model);
+            finalizeModelLoading(model);
+        }
+
+        function loadNorthlightModel() {
+            gltfLoader.load('./building/Northlight.glb', (gltf) => {
+                pendingNorthlightGltf = gltf;
+                tryInitBuilding();
+            }, undefined, (error) => {
+                console.error('Error loading Northlight model:', error);
+                isBuildingReady = true;
+                document.getElementById('loading').style.display = 'none';
+                loadShow();
+            });
+        }
+
+        buildingTextureManager.onLoad = () => {
+            buildingTexturesReady = true;
+            initExteriorFacades();
+            tryInitBuilding();
+            needsRender = true;
+        };
         
         // =====================================================
         // MODEL MANAGEMENT
@@ -305,6 +540,9 @@
         };
         
         let modelScene = null;
+        let isBuildingReady = false;
+        let currentLoadedShow = null;
+        let showLoadInProgress = false;
 
         // Placement dispatch: sub-models call this when loaded so they're placed
         // immediately if the main model is already in the scene, or queued until it is.
@@ -334,15 +572,21 @@
             gltfLoader.load(path, (gltf) => {
                 const model = gltf.scene;
                 models[key] = model;
-                
+
                 // Always set scale, position, and rotation
                 model.scale.set(scale, scale, scale);
                 model.position.set(...position);
                 model.rotation.set(rotation[0], rotation[1], rotation[2]);
-                
+
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+
                 if (materialFn) materialFn(model);
-                
-                console.log(`${key} model loaded - position:`, position, 'scale:', scale, 'rotation:', rotation);
+
                 if (onLoad) registerPlacement(key, onLoad);
             }, undefined, (error) => {
                 console.error(`Error loading ${key} model:`, error);
@@ -474,11 +718,11 @@
                     else clone.scale.set(item.scale.x ?? 1, item.scale.y ?? 1, item.scale.z ?? 1);
                 }
                 applyGLBMaterials(clone, false);
+                liftObjectAboveFloor(clone, item);
                 scene.add(clone);
                 if (item.collider !== false) addObjectCollider(clone);
                 if (key === 'table' && item.food === true) addTableFoodToScene(clone);
                 needsRender = true;
-                console.log('Placed furniture instance:', key);
             };
 
             if (models[key]) {
@@ -547,13 +791,89 @@
                 // Store door positions
                 if (name.includes('door')) {
                     doorPositions[child.name] = center.clone();
-                    console.log('Found door:', child.name, 'at position:', center);
                 }
                 
                 // Detect wall colliders
                 if (size.y > 5 && (size.x > 1 || size.z > 1)) {
                     wallColliders.push(bbox.clone());
-                    console.log('Added wall collider:', child.name, 'Size:', size);
+                }
+
+                // Force the exported floor mesh to use the concrete set.
+                if (child.name === 'Floor0') {
+                    if (!interiorConcreteOverlay) {
+                        // Slight inset prevents floor overlay from poking through wall planes.
+                        const overlayInset = 2.2;
+
+                        const overlayMaterial = concreteFloorMaterial.clone();
+                        overlayMaterial.side = THREE.FrontSide;
+
+                        // Clone every texture so the interior floor can have its own
+                        // repeat independent of the exterior ground plane.
+                        // Keep detail density high without forcing obvious short-repeat tiling.
+                        const tileSize = 14;
+                        const oW = Math.max(1, size.x - overlayInset);
+                        const oH = Math.max(1, size.z - overlayInset);
+                        const oRepX = Math.max(1, oW / tileSize);
+                        const oRepY = Math.max(1, oH / tileSize);
+                        const overlayThickness = INTERIOR_FLOOR_THICKNESS;
+                        const overlaySeed = 211;
+                        const uvScale = 1.0 + seeded01(overlaySeed + 23) * 0.1;
+                        const texRepeatX = Math.max(0.08, oRepX * uvScale);
+                        const texRepeatY = Math.max(0.08, oRepY * uvScale);
+
+                        ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap'].forEach((key) => {
+                            if (!overlayMaterial[key]) return;
+                            overlayMaterial[key] = overlayMaterial[key].clone();
+                            overlayMaterial[key].wrapS = THREE.RepeatWrapping;
+                            overlayMaterial[key].wrapT = THREE.RepeatWrapping;
+                            overlayMaterial[key].repeat.set(texRepeatX, texRepeatY);
+                            overlayMaterial[key].offset.set(seeded01(overlaySeed + 53), seeded01(overlaySeed + 67));
+                            overlayMaterial[key].rotation = 0;
+                            overlayMaterial[key].center.set(0.5, 0.5);
+                            overlayMaterial[key].needsUpdate = true;
+                        });
+
+                        // Depth bias helps prevent coplanar flicker on some Chrome/GPU combos.
+                        overlayMaterial.polygonOffset = true;
+                        overlayMaterial.polygonOffsetFactor = -2;
+                        overlayMaterial.polygonOffsetUnits = -2;
+
+                        // Lower high-frequency normal/bump detail to reduce shimmer while moving.
+                        if (overlayMaterial.normalScale) {
+                            overlayMaterial.normalScale = new THREE.Vector2(0.075, 0.075);
+                        }
+                        overlayMaterial.bumpScale = 0.015;
+
+                        if (isChromeBrowser) {
+                            // Chrome/GPU combinations can shimmer with high-frequency normal/arm details.
+                            // Keep diffuse stochastic detail, but use a stable matte response.
+                            overlayMaterial.normalMap = null;
+                            overlayMaterial.bumpMap = null;
+                            overlayMaterial.roughnessMap = null;
+                            overlayMaterial.metalnessMap = null;
+                            overlayMaterial.aoMap = null;
+                            overlayMaterial.roughness = 0.9;
+                            overlayMaterial.metalness = 0.0;
+                        }
+
+                        applyInteriorConcreteStochastic(overlayMaterial, overlaySeed, { stable: isChromeBrowser });
+                        overlayMaterial.needsUpdate = true;
+
+                        interiorConcreteOverlay = createConcreteFloorSlab(oW, oH, overlayThickness, overlayMaterial);
+                        interiorConcreteOverlay.position.set(
+                            center.x,
+                            center.y + 0.008 - (overlayThickness * 0.5),
+                            center.z
+                        );
+                        interiorConcreteOverlay.receiveShadow = true;
+                        interiorConcreteOverlay.castShadow = false;
+                        interiorConcreteOverlay.renderOrder = 3;
+                        scene.add(interiorConcreteOverlay);
+                        pruneExteriorConcreteUnderInterior(interiorConcreteOverlay);
+                    }
+
+                    // Hide original GLB floor to avoid underside-only appearance artifacts.
+                    child.visible = false;
                 }
                 
                 child.castShadow = true;
@@ -566,51 +886,377 @@
             scene.add(model);
             flushPlacements();
             updateDebugLabels(model);
+            buildWallPlacementGuides();
             needsRender = true;
             // Building walls are now in the scene — safe to place show objects.
+            isBuildingReady = true;
             document.getElementById('loading').style.display = 'none';
             loadShow();
         }
         
-        gltfLoader.load('./building/Northlight.glb', (gltf) => {
-            const model = gltf.scene;
-            modelScene = model;
-            
-            setupModelTransform(model);
-            createAndApplyClippingPlane(model);
-            processModelMeshes(model);
-            finalizeModelLoading(model);
-        }, undefined, (error) => {
-            console.error('Error loading Northlight model:', error);
-            // Still show the page and load the show even without the building GLB
-            document.getElementById('loading').style.display = 'none';
-            loadShow();
-        });
+        loadNorthlightModel();
 
         // Exterior ground
-        const concreteFloorTexture = textureLoader.load('./building/concrete.jpg');
-        concreteFloorTexture.wrapS = THREE.RepeatWrapping;
-        concreteFloorTexture.wrapT = THREE.RepeatWrapping;
-        concreteFloorTexture.repeat.set(1, 2);
-        concreteFloorTexture.magFilter = THREE.LinearFilter;
-        concreteFloorTexture.minFilter = THREE.LinearMipmapLinearFilter;
-        concreteFloorTexture.colorSpace = THREE.SRGBColorSpace;
-        concreteFloorTexture.anisotropy = 16;
+        const concreteBaseColor = textureLoader.load('./building/Concrete_texture/worn_concrete_floor_diff_2k.jpg');
+        const concreteAo = textureLoader.load('./building/Concrete_texture/worn_concrete_floor_ao_2k.jpg');
+        const concreteArm = textureLoader.load('./building/Concrete_texture/worn_concrete_floor_arm_2k.jpg');
+        const concreteHeight = textureLoader.load('./building/Concrete_texture/worn_concrete_floor_disp_2k.png');
 
-        const groundGeometry = new THREE.PlaneGeometry(84.8, 186);
-        const groundMaterial = new THREE.MeshStandardMaterial({
-            map: concreteFloorTexture,
-            color: 0xcccccc,  // Brighter for better lighting
-            roughness: 0.7,  // Slightly less rough for realism
-            metalness: 0.0,
-            side: THREE.DoubleSide
+        const groundWidth = 84.8;
+        const groundLength = 186;
+        const EXTERIOR_GROUND_TOP_Y = -1.95;
+        const EXTERIOR_GROUND_THICKNESS = 0.24;
+        const INTERIOR_FLOOR_THICKNESS = 0.2;
+
+        function createConcreteFloorSlab(width, depth, thickness, topMaterial) {
+            const slabGeometry = new THREE.BoxGeometry(width, thickness, depth);
+
+            // r160+: aoMap uses 'uv1' (not 'uv2').
+            slabGeometry.setAttribute(
+                'uv1',
+                new THREE.BufferAttribute(slabGeometry.attributes.uv.array, 2)
+            );
+
+            const sideMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8c8c8c,
+                roughness: 0.92,
+                metalness: 0.0
+            });
+            const bottomMaterial = new THREE.MeshStandardMaterial({
+                color: 0x737373,
+                roughness: 0.96,
+                metalness: 0.0
+            });
+
+            // BoxGeometry face material order: right, left, top, bottom, front, back
+            const slabMaterials = [
+                sideMaterial.clone(),
+                sideMaterial.clone(),
+                topMaterial,
+                bottomMaterial,
+                sideMaterial.clone(),
+                sideMaterial.clone()
+            ];
+
+            return new THREE.Mesh(slabGeometry, slabMaterials);
+        }
+
+        // Lower repeat values make each concrete tile appear larger.
+        const repeatX = 0.30;
+        const repeatY = 0.30 * (groundLength / groundWidth);
+
+        [
+            concreteBaseColor,
+            concreteAo,
+            concreteArm,
+            concreteHeight
+        ].forEach((texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(repeatX, repeatY);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
         });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.set(-1, -1.8, -49.4);
-        ground.castShadow = true;  // Ground casts shadows on itself
-        ground.receiveShadow = true;  // Ground receives shadows from other objects
-        scene.add(ground);
+
+        concreteBaseColor.colorSpace = THREE.SRGBColorSpace;
+        concreteAo.colorSpace = THREE.NoColorSpace;
+        concreteArm.colorSpace = THREE.NoColorSpace;
+        concreteHeight.colorSpace = THREE.NoColorSpace;
+
+        const concreteFloorMaterial = new THREE.MeshStandardMaterial({
+            map: concreteBaseColor,
+            aoMap: concreteAo,
+            aoMapIntensity: 0.65,
+            roughnessMap: concreteArm,
+            metalnessMap: concreteArm,
+
+            roughness: 0.82,
+
+            bumpMap: concreteHeight,
+            bumpScale: 0.028,
+
+            color: 0xe6e6e6,
+            metalness: 0.0,
+            side: THREE.FrontSide
+        });
+
+        const exteriorGroundMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8f8f8f,
+            roughness: 0.92,
+            metalness: 0.0,
+            side: THREE.FrontSide
+        });
+
+        setTimeout(() => {
+            exrLoader.load(
+                './building/Concrete_texture/worn_concrete_floor_nor_gl_2k.exr',
+                (normalTex) => {
+                    [normalTex].forEach((texture) => {
+                        texture.wrapS = THREE.RepeatWrapping;
+                        texture.wrapT = THREE.RepeatWrapping;
+                        texture.repeat.set(repeatX, repeatY);
+                        texture.magFilter = THREE.LinearFilter;
+                        texture.minFilter = THREE.LinearMipmapLinearFilter;
+                        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    });
+                    normalTex.colorSpace = THREE.NoColorSpace;
+                    concreteFloorMaterial.normalMap = normalTex;
+                    concreteFloorMaterial.normalScale = new THREE.Vector2(0.11, 0.11);
+                    concreteFloorMaterial.needsUpdate = true;
+                    needsRender = true;
+                },
+                undefined,
+                (error) => {
+                    console.warn('Concrete normal EXR failed to load:', error);
+                }
+            );
+        }, 300);
+
+        function applyWallStochastic(material) {
+            if (!material || !material.map) return;
+            material.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    [
+                        '#include <common>',
+                        'vec2 wallHash2(vec2 p) {',
+                        '    vec2 q = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));',
+                        '    return fract(sin(q) * 43758.5453123);',
+                        '}',
+                        // Stochastic tiling in tile space (0-1 per tile) so offsets are
+                        // always a full tile fraction regardless of repeat count.
+                        'vec4 wallTriStochastic(sampler2D tex, vec2 uv) {',
+                        '    vec2 tileId = floor(uv);',       // which tile we are in
+                        '    vec2 tileUv = fract(uv);',       // 0..1 within that tile
+                        '    vec2 r0 = wallHash2(tileId);',
+                        '    vec2 r1 = wallHash2(tileId + vec2(1.0, 0.0));',
+                        '    vec2 r2 = wallHash2(tileId + vec2(0.0, 1.0));',
+                        '    vec2 r3 = wallHash2(tileId + vec2(1.0, 1.0));',
+                        // Bilinear blend weights based on position within tile
+                        '    float wx = smoothstep(0.0, 1.0, tileUv.x);',
+                        '    float wy = smoothstep(0.0, 1.0, tileUv.y);',
+                        '    float w00 = (1.0-wx)*(1.0-wy);',
+                        '    float w10 = wx*(1.0-wy);',
+                        '    float w01 = (1.0-wx)*wy;',
+                        '    float w11 = wx*wy;',
+                        // Each corner samples from a random offset tile — offset by 0..1 tile widths
+                        '    vec4 s0 = texture2D(tex, tileUv + floor(r0 * 4.0));',
+                        '    vec4 s1 = texture2D(tex, tileUv + floor(r1 * 4.0));',
+                        '    vec4 s2 = texture2D(tex, tileUv + floor(r2 * 4.0));',
+                        '    vec4 s3 = texture2D(tex, tileUv + floor(r3 * 4.0));',
+                        '    return s0*w00 + s1*w10 + s2*w01 + s3*w11;',
+                        '}'
+                    ].join('\n')
+                );
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <map_fragment>',
+                    [
+                        '#ifdef USE_MAP',
+                        '    vec4 sampledDiffuseColor = wallTriStochastic(map, vMapUv);',
+                        '    #ifdef DECODE_VIDEO_TEXTURE',
+                        '    sampledDiffuseColor = vec4(mix(pow(sampledDiffuseColor.rgb * 0.9478672986 + vec3(0.0521327014), vec3(2.4)), sampledDiffuseColor.rgb * 0.0773993808, vec3(lessThanEqual(sampledDiffuseColor.rgb, vec3(0.04045)))), sampledDiffuseColor.w);',
+                        '    #endif',
+                        '    diffuseColor *= sampledDiffuseColor;',
+                        '#endif'
+                    ].join('\n')
+                );
+            };
+            material.customProgramCacheKey = () => 'wall-stochastic-v2';
+            material.needsUpdate = true;
+        }
+
+        function applyInteriorConcreteStochastic(material, seed = 0, options = {}) {
+            if (!material || !material.map) return;
+            const stableMix = !!options.stable;
+            const primaryJitter = stableMix ? '0.72' : '0.96';
+            const secondaryJitter = stableMix ? '0.44' : '0.58';
+            const primaryScaleJitter = stableMix ? '0.07' : '0.11';
+            const secondaryScaleJitter = stableMix ? '0.05' : '0.08';
+            const macroBlend = stableMix ? '0.12' : '0.16';
+            const blendFloor = stableMix ? '0.28' : '0.22';
+            const blendGain = stableMix ? '0.26' : '0.34';
+
+            material.userData.interiorConcreteSeed = seed;
+            material.userData.interiorConcreteStableMix = stableMix;
+            material.onBeforeCompile = (shader) => {
+                const seeded = Number.isFinite(material.userData.interiorConcreteSeed)
+                    ? material.userData.interiorConcreteSeed
+                    : 0;
+
+                shader.uniforms.interiorConcreteSeed = { value: seeded };
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    [
+                        '#include <common>',
+                        'uniform float interiorConcreteSeed;',
+                        'float interiorHash(vec2 p) {',
+                        '    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
+                        '}',
+                        'vec2 interiorHash2(vec2 p) {',
+                        '    vec2 q = vec2(',
+                        '        dot(p, vec2(127.1, 311.7)),',
+                        '        dot(p, vec2(269.5, 183.3))',
+                        '    );',
+                        '    return fract(sin(q) * 43758.5453123);',
+                        '}',
+                        'float interiorNoise(vec2 p) {',
+                        '    vec2 i = floor(p);',
+                        '    vec2 f = fract(p);',
+                        '    vec2 u = f * f * (3.0 - 2.0 * f);',
+                        '    float a = interiorHash(i + vec2(0.0, 0.0));',
+                        '    float b = interiorHash(i + vec2(1.0, 0.0));',
+                        '    float c = interiorHash(i + vec2(0.0, 1.0));',
+                        '    float d = interiorHash(i + vec2(1.0, 1.0));',
+                        '    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);',
+                        '}',
+                        'mat2 interiorRot(float a) {',
+                        '    float c = cos(a);',
+                        '    float s = sin(a);',
+                        '    return mat2(c, -s, s, c);',
+                        '}',
+                        'vec4 interiorSampleTriStochastic(sampler2D tex, vec2 uv, float seed, float jitterAmount, float scaleJitter) {',
+                        '    const float K1 = 0.3660254037844386;',
+                        '    const float K2 = 0.21132486540518713;',
+                        '    vec2 p = uv * 1.75;',
+                        '    vec2 i = floor(p + (p.x + p.y) * K1);',
+                        '    vec2 a = p - i + (i.x + i.y) * K2;',
+                        '    vec2 o = (a.x > a.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);',
+                        '    vec2 b = a - o + K2;',
+                        '    vec2 c = a - 1.0 + 2.0 * K2;',
+                        '    vec3 w = max(0.5 - vec3(dot(a, a), dot(b, b), dot(c, c)), 0.0);',
+                        '    w = w * w;',
+                        '    w = w * w;',
+                        '    vec3 wn = w / max(dot(w, vec3(1.0)), 1e-5);',
+                        '    vec2 v0 = i;',
+                        '    vec2 v1 = i + o;',
+                        '    vec2 v2 = i + vec2(1.0);',
+                        '    vec2 rnd0 = interiorHash2(v0 + vec2(seed, seed * 1.37));',
+                        '    vec2 rnd1 = interiorHash2(v1 + vec2(seed, seed * 1.37));',
+                        '    vec2 rnd2 = interiorHash2(v2 + vec2(seed, seed * 1.37));',
+                        '    float ang0 = 6.28318530718 * rnd0.x;',
+                        '    float ang1 = 6.28318530718 * rnd1.x;',
+                        '    float ang2 = 6.28318530718 * rnd2.x;',
+                        '    float scl0 = mix(1.0 - scaleJitter, 1.0 + scaleJitter, rnd0.y);',
+                        '    float scl1 = mix(1.0 - scaleJitter, 1.0 + scaleJitter, rnd1.y);',
+                        '    float scl2 = mix(1.0 - scaleJitter, 1.0 + scaleJitter, rnd2.y);',
+                        '    vec2 off0 = (interiorHash2(v0 + vec2(19.7, 37.1) + seed) - 0.5) * jitterAmount;',
+                        '    vec2 off1 = (interiorHash2(v1 + vec2(19.7, 37.1) + seed) - 0.5) * jitterAmount;',
+                        '    vec2 off2 = (interiorHash2(v2 + vec2(19.7, 37.1) + seed) - 0.5) * jitterAmount;',
+                        '    vec2 uv0 = interiorRot(ang0) * ((uv * scl0) - 0.5) + 0.5 + off0;',
+                        '    vec2 uv1 = interiorRot(ang1) * ((uv * scl1) - 0.5) + 0.5 + off1;',
+                        '    vec2 uv2 = interiorRot(ang2) * ((uv * scl2) - 0.5) + 0.5 + off2;',
+                        '    vec4 s0 = texture2D(tex, uv0);',
+                        '    vec4 s1 = texture2D(tex, uv1);',
+                        '    vec4 s2 = texture2D(tex, uv2);',
+                        '    return s0 * wn.x + s1 * wn.y + s2 * wn.z;',
+                        '}'
+                    ].join('\n')
+                );
+
+                const mapFragment = [
+                    '#ifdef USE_MAP',
+                    '    vec2 uv = vMapUv;',
+                    `    vec4 cA = interiorSampleTriStochastic(map, uv, interiorConcreteSeed + 11.0, ${primaryJitter}, ${primaryScaleJitter});`,
+                    `    vec4 cB = interiorSampleTriStochastic(map, uv * 1.37 + vec2(0.173, 0.287), interiorConcreteSeed + 29.0, ${secondaryJitter}, ${secondaryScaleJitter});`,
+                    '    float blendNoise = interiorNoise(uv * 2.3 + vec2(interiorConcreteSeed * 0.017, interiorConcreteSeed * 0.023));',
+                    `    float blendT = ${blendFloor} + ${blendGain} * smoothstep(0.22, 0.78, blendNoise);`,
+                    '    vec4 sampledDiffuseColor = mix(cA, cB, clamp(blendT, 0.0, 1.0));',
+                    '    vec2 macroUv = uv * 0.21 + vec2(interiorConcreteSeed * 0.013, interiorConcreteSeed * 0.017);',
+                    '    vec4 macroColor = texture2D(map, macroUv);',
+                    `    sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, macroColor.rgb, ${macroBlend});`,
+                    '    diffuseColor *= sampledDiffuseColor;',
+                    '#endif'
+                ].join('\n');
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <map_fragment>',
+                    mapFragment
+                );
+            };
+
+            material.customProgramCacheKey = () => stableMix
+                ? 'interior-concrete-stochastic-v2-stable'
+                : 'interior-concrete-stochastic-v2';
+            material.needsUpdate = true;
+        }
+
+        function seeded01(seed) {
+            const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453123;
+            return x - Math.floor(x);
+        }
+
+        const exteriorConcretePatches = [];
+
+        function pruneExteriorConcreteUnderInterior(interiorFloorMesh) {
+            if (!interiorFloorMesh || exteriorConcretePatches.length === 0) return;
+
+            interiorFloorMesh.updateWorldMatrix(true, false);
+            const interiorBounds = new THREE.Box3().setFromObject(interiorFloorMesh);
+            interiorBounds.expandByScalar(0.2);
+
+            for (let i = exteriorConcretePatches.length - 1; i >= 0; i--) {
+                const patch = exteriorConcretePatches[i];
+                if (!patch || !patch.parent) {
+                    exteriorConcretePatches.splice(i, 1);
+                    continue;
+                }
+                patch.updateWorldMatrix(true, false);
+                const patchBounds = new THREE.Box3().setFromObject(patch);
+                if (patchBounds.intersectsBox(interiorBounds)) {
+                    patch.parent.remove(patch);
+                    exteriorConcretePatches.splice(i, 1);
+                }
+            }
+        }
+
+        function buildConcreteGroundPatches() {
+            // Fewer, larger patches to avoid the floor reading as a 5x repeated tile grid.
+            const patchCols = 3;
+            const patchRows = 6;
+            const patchW = groundWidth / patchCols;
+            const patchH = groundLength / patchRows;
+            const patchOverlap = 0.0;
+            const originX = -1;
+            const originY = EXTERIOR_GROUND_TOP_Y;
+            const originZ = -49.4;
+
+            for (let row = 0; row < patchRows; row++) {
+                for (let col = 0; col < patchCols; col++) {
+                    const seed = row * 97 + col * 131 + 17;
+                    const localX = -groundWidth * 0.5 + patchW * 0.5 + col * patchW;
+                    const localZ = -groundLength * 0.5 + patchH * 0.5 + row * patchH;
+
+                    const mat = exteriorGroundMaterial.clone();
+                    mat.userData.concreteSeed = seeded01(seed + 101) * 100.0;
+                    mat.color = exteriorGroundMaterial.color.clone();
+                    mat.roughness = exteriorGroundMaterial.roughness;
+
+                    const patch = createConcreteFloorSlab(
+                        patchW + patchOverlap,
+                        patchH + patchOverlap,
+                        EXTERIOR_GROUND_THICKNESS,
+                        mat
+                    );
+                    patch.position.set(
+                        originX + localX,
+                        originY - (EXTERIOR_GROUND_THICKNESS * 0.5),
+                        originZ + localZ
+                    );
+                    patch.castShadow = true;
+                    patch.receiveShadow = true;
+                    patch.renderOrder = 1;
+                    exteriorConcretePatches.push(patch);
+                    scene.add(patch);
+                }
+            }
+        }
+
+        buildConcreteGroundPatches();
+
+        concreteFloorMaterial.side = THREE.DoubleSide;
+        let interiorConcreteOverlay = null;
 
         // Add sky blue box — fog:false + same color as skyMat so tone-mapping output matches
         const boxGeometry = new THREE.BoxGeometry(32.5, 2, 11);
@@ -623,10 +1269,8 @@
         // FLAT ROOF — wooden beams, visible only in game mode
         // =====================================================
 
-        (function buildFlatRoof() {
-
-
-
+        function ensureFlatRoof() {
+            if (roofGroup) return;
             const woodTex = textureLoader.load('./building/wood.png');
             woodTex.wrapS = THREE.RepeatWrapping;
             woodTex.wrapT = THREE.RepeatWrapping;
@@ -640,8 +1284,8 @@
             const beamMat = new THREE.MeshBasicMaterial({ map: woodTex, color: 0xf0f0f0 });
             // Cross-brace metal — near-black painted steel like photo
             const braceMat = new THREE.MeshStandardMaterial({ color: 0xa0a0a0 });
-            // Dark void above the beams
-            const darkMat = new THREE.MeshBasicMaterial({ color: 0x151210, side: THREE.BackSide });
+            // Dark void above the beams (top-facing only; hidden from below)
+            const darkMat = new THREE.MeshBasicMaterial({ color: 0x151210, side: THREE.FrontSide });
             // Can-light housing — matte white disc
             const canMat  = new THREE.MeshBasicMaterial({ color: 0xe8e8e0 });
             // Can-light emissive lens — bright white circle
@@ -724,7 +1368,7 @@
 
             // ── Dark deck above ──
             const deck = new THREE.Mesh(new THREE.PlaneGeometry(W, D), darkMat);
-            deck.rotation.x = Math.PI * 0.5;
+            deck.rotation.x = -Math.PI * 0.5;
             deck.position.set(CX, CEIL_Y + 0.05, CZ);
             roofGroup.add(deck);
 
@@ -738,9 +1382,10 @@
             topMatTexture.colorSpace = THREE.SRGBColorSpace;
             topMatTexture.anisotropy = 8;
             
-            const topMat = new THREE.MeshStandardMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.95, map: topMatTexture });
+            // Exterior roof cover — visible from above only
+            const topMat = new THREE.MeshStandardMaterial({ color: 0x000000, side: THREE.FrontSide, transparent: true, opacity: 0.95, map: topMatTexture });
             const topPlane = new THREE.Mesh(new THREE.PlaneGeometry(W+10, D+10), topMat);
-            topPlane.rotation.x = Math.PI * 0.5;
+            topPlane.rotation.x = -Math.PI * 0.5;
             topPlane.position.set(CX, CEIL_Y + 0.2, CZ);
             roofGroup.add(topPlane);
 
@@ -770,50 +1415,90 @@
             }
 
             scene.add(roofGroup);
-        })();
-
-        // Call downloadRoofGLB() in the browser console to export the roof as a .glb file
-        function downloadRoofGLB() {
-            const exporter = new GLTFExporter();
-            const wasVisible = roofGroup.visible;
-            roofGroup.visible = true; // GLTFExporter skips invisible objects
-            roofGroup.traverse(c => { c._wasVisible = c.visible; c.visible = true; });
-            exporter.parse(roofGroup, (glb) => {
-                roofGroup.visible = wasVisible;
-                roofGroup.traverse(c => { c.visible = c._wasVisible; });
-                const blob = new Blob([glb], { type: 'application/octet-stream' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'roof.glb';
-                a.click();
-                URL.revokeObjectURL(a.href);
-            }, (err) => {
-                roofGroup.visible = wasVisible;
-                roofGroup.traverse(c => { c.visible = c._wasVisible; });
-                console.error('GLTFExporter error:', err);
-            }, { binary: true });
         }
-        //setTimeout(() => { downloadRoofGLB(); }, 3000);
 
         // =====================================================
         // LIGHTING CONFIGURATION & SETUP
         // =====================================================
         
         let ambientLight, hemiLight, directionalLight, fillLight, frontFillLight, backFillLight;
+        let gallerySpotLightsGroup = null;
         
         const lightingConfig = {
-            ambient: { color: 0xffffff, intensity: 0.5 },  // Reduced from 1.2
-            hemisphere: { sky: 0xfff8f0, ground: 0x404040, intensity: 1 },  // Increased from 1.0
+            ambient: { color: 0xffffff, intensity: 0.24 },
+            hemisphere: { sky: 0xfff8f0, ground: 0x404040, intensity: 0.38 },
             directional: {
                 color: 0xfff8f0,
-                intensity: 1,  // Reduced from 1.8 for subtlety
+                intensity: 0.78,
                 position: [50, 80, 50],
-                shadow: { mapSize: 1024, left: -100, right: 100, top: 100, bottom: -100 }  // Reduced from 2048 for performance
+                shadow: { mapSize: 2048, left: -60, right: 60, top: 60, bottom: -60 }
             },
-            fill: { color: 0xf0f4ff, intensity: 1.3, position: [-50, 40, -50] },  // Increased from 1.2
-            frontFill: { color: 0xffffff, intensity: 1.1, position: [0, 30, 100] },  // Increased from 1.0
-            backFill: { color: 0xfff0e8, intensity: 1.0, position: [0, 20, -150] }  // Increased from 0.8
+            fill: { color: 0xf0f4ff, intensity: 0.75, position: [-50, 40, -50] },
+            frontFill: { color: 0xffffff, intensity: 0.62, position: [0, 30, 100] },
+            backFill: { color: 0xfff0e8, intensity: 0.58, position: [0, 20, -150] },
+            spotlightDefaults: {
+                color: 0xfff2dc,
+                intensity: 3.2,
+                distance: 65,
+                angle: THREE.MathUtils.degToRad(21),
+                penumbra: 0.5,
+                decay: 2,
+                shadowMapSize: 2048,
+                shadowBias: -0.0002,
+                shadowNormalBias: 0.02
+            },
+            gallerySpots: [
+                { position: [-24, 27.2, 30], target: [-24, 10.2, 30], intensity: 3.2, castShadow: true },
+                { position: [-8, 27.2, 31], target: [-8, 10.5, 31], intensity: 3.0 },
+                { position: [8, 27.2, 31], target: [8, 10.5, 31], intensity: 3.0 },
+                { position: [24, 27.2, 30], target: [24, 10.2, 30], intensity: 3.2, castShadow: true },
+                { position: [-20, 27.2, -12], target: [-20, 11, -12], intensity: 2.9 },
+                { position: [0, 27.2, -10], target: [0, 11.2, -10], intensity: 3.1, castShadow: true },
+                { position: [20, 27.2, -12], target: [20, 11, -12], intensity: 2.9 },
+                { position: [-13, 27.2, -52], target: [-13, 10.8, -52], intensity: 3.0 },
+                { position: [13, 27.2, -52], target: [13, 10.8, -52], intensity: 3.0 },
+                { position: [0, 27.2, -88], target: [0, 10.6, -88], intensity: 3.1, castShadow: true }
+            ]
         };
+
+        function setupMotivatedGallerySpots() {
+            if (gallerySpotLightsGroup) {
+                scene.remove(gallerySpotLightsGroup);
+            }
+
+            gallerySpotLightsGroup = new THREE.Group();
+            gallerySpotLightsGroup.name = 'gallerySpotLights';
+
+            const defaults = lightingConfig.spotlightDefaults;
+
+            for (const spec of lightingConfig.gallerySpots) {
+                const spot = new THREE.SpotLight(
+                    spec.color ?? defaults.color,
+                    spec.intensity ?? defaults.intensity,
+                    spec.distance ?? defaults.distance,
+                    spec.angle ?? defaults.angle,
+                    spec.penumbra ?? defaults.penumbra,
+                    defaults.decay
+                );
+
+                spot.position.set(...spec.position);
+                spot.castShadow = !!spec.castShadow;
+
+                if (spot.castShadow) {
+                    spot.shadow.mapSize.set(defaults.shadowMapSize, defaults.shadowMapSize);
+                    spot.shadow.bias = defaults.shadowBias;
+                    spot.shadow.normalBias = defaults.shadowNormalBias;
+                }
+
+                const target = new THREE.Object3D();
+                target.position.set(...spec.target);
+                gallerySpotLightsGroup.add(target);
+                spot.target = target;
+                gallerySpotLightsGroup.add(spot);
+            }
+
+            scene.add(gallerySpotLightsGroup);
+        }
         
         function setupLighting() {
             // Ambient light
@@ -854,6 +1539,9 @@
             backFillLight = new THREE.DirectionalLight(lightingConfig.backFill.color, lightingConfig.backFill.intensity);
             backFillLight.position.set(...lightingConfig.backFill.position);
             scene.add(backFillLight);
+
+            // Motivated track-style accent lighting for artwork and key wall zones.
+            setupMotivatedGallerySpots();
         }
         
         setupLighting();
@@ -866,44 +1554,79 @@
 
 
 
-        // wallpaperMaterial created without map; texture generated after first paint
+        // Interior wall material (PBR texture set)
         const wallpaperMaterial = new THREE.MeshStandardMaterial({
             color: 0xffffff,
-            roughness: 0.8,  // Reduced for smoother walls (from 0.0)
+            roughness: 0.96,
             metalness: 0.0,
+            emissive: 0x2a2a2a,
+            emissiveIntensity: 0.12,
             side: THREE.DoubleSide
         });
-        
-        const wallTexture = textureLoader.load('./building/wall.png');
-        wallTexture.wrapS = THREE.RepeatWrapping;
-        wallTexture.wrapT = THREE.RepeatWrapping;
-        wallTexture.repeat.set(9, 4);
-        wallTexture.magFilter = THREE.LinearFilter;
-        wallTexture.minFilter = THREE.LinearMipmapLinearFilter;
-        wallTexture.colorSpace = THREE.SRGBColorSpace;  // Proper color space
-        wallTexture.anisotropy = 16;  // Better detail at angles
-        wallpaperMaterial.map = wallTexture;
-        wallpaperMaterial.needsUpdate = true;
 
-        const brickTexture = textureLoader.load('./building/brick.jpg');
-        brickTexture.wrapS = THREE.RepeatWrapping;
-        brickTexture.wrapT = THREE.RepeatWrapping;
-        brickTexture.repeat.set(2, 3);
-        brickTexture.magFilter = THREE.LinearFilter;
-        brickTexture.minFilter = THREE.LinearMipmapLinearFilter;
-        brickTexture.colorSpace = THREE.SRGBColorSpace;
-        brickTexture.anisotropy = 16;
+        const wallBaseColor = textureLoader.load('./building/Wall_texture/Wall_Base_Color.jpg');
+        const wallNormal = textureLoader.load('./building/Wall_texture/Wall_Normal.jpg');
+        const wallRoughness = textureLoader.load('./building/Wall_texture/Wall_Roughness.jpg');
+        const wallHeight = textureLoader.load('./building/Wall_texture/Wall_Height.jpg');
+
+        [wallBaseColor, wallNormal, wallRoughness, wallHeight].forEach((texture) => {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(4.8, 2.3);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        });
+
+        wallBaseColor.colorSpace = THREE.SRGBColorSpace;
+        wallNormal.colorSpace = THREE.NoColorSpace;
+        wallRoughness.colorSpace = THREE.NoColorSpace;
+        wallHeight.colorSpace = THREE.NoColorSpace;
+
+        wallpaperMaterial.map = wallBaseColor;
+        wallpaperMaterial.normalMap = wallNormal;
+        wallpaperMaterial.normalScale = new THREE.Vector2(0.005, 0.005);
+        wallpaperMaterial.roughnessMap = null;
+        wallpaperMaterial.bumpMap = wallHeight;
+        wallpaperMaterial.bumpScale = 0.0008;
+        wallpaperMaterial.envMapIntensity = 0.3;
+        applyWallStochastic(wallpaperMaterial);
+
+        const brickBaseColor = textureLoader.load('./building/Brick wall/factory_brick_diff_2k.jpg');
+        const brickArm = textureLoader.load('./building/Brick wall/factory_brick_arm_2k.jpg');
+        const brickHeight = textureLoader.load('./building/Brick wall/factory_brick_disp_2k.png');
+
+        const configureBrickTexture = (texture) => {
+            if (!texture) return;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(2.2, 3.4);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        };
+
+        [brickBaseColor, brickArm, brickHeight].forEach(configureBrickTexture);
+
+        brickBaseColor.colorSpace = THREE.SRGBColorSpace;
+        brickArm.colorSpace = THREE.NoColorSpace;
+        brickHeight.colorSpace = THREE.NoColorSpace;
 
         const brickMaterial = new THREE.MeshStandardMaterial({
-            map: brickTexture,
-            roughness: 0.9,
+            map: brickBaseColor,
+            roughnessMap: brickArm,
+            roughness: 0.92,
+            metalnessMap: brickArm,
             metalness: 0.0,
+            bumpMap: brickHeight,
+            bumpScale: 0.012,
+            color: 0xffb3a4,
             vertexColors: false
         });
         
         const whiteMaterial = new THREE.MeshStandardMaterial({
             color: 0xf0f0f0,
-            roughness: 0.8,
+            roughness: 0.96,
             metalness: 0.0,
             side: THREE.DoubleSide
         });
@@ -928,13 +1651,91 @@
         });
         
         const wall1Material = new THREE.MeshStandardMaterial({
-            map: brickTexture,
-            color: 0xffffff,
-            roughness: 0.9,
+            map: brickBaseColor,
+            roughnessMap: brickArm,
+            metalnessMap: brickArm,
+            bumpMap: brickHeight,
+            bumpScale: 0.012,
+            color: 0xffb3a4,
+            roughness: 0.92,
             metalness: 0.0,
             side: THREE.DoubleSide
         });
-        wall1Material.needsUpdate = true;
+
+        setTimeout(() => {
+            exrLoader.load(
+                './building/Brick wall/factory_brick_nor_gl_2k.exr',
+                (normalTex) => {
+                    configureBrickTexture(normalTex);
+                    normalTex.colorSpace = THREE.NoColorSpace;
+                    brickMaterial.normalMap = normalTex;
+                    brickMaterial.normalScale = new THREE.Vector2(0.16, 0.16);
+                    wall1Material.normalMap = normalTex;
+                    wall1Material.normalScale = new THREE.Vector2(0.16, 0.16);
+                    brickMaterial.needsUpdate = true;
+                    wall1Material.needsUpdate = true;
+                    needsRender = true;
+                },
+                undefined,
+                (error) => {
+                    console.warn('Factory brick normal EXR failed to load:', error);
+                }
+            );
+        }, 400);
+
+        const blackBaseboardMaterial = new THREE.MeshStandardMaterial({
+            color: 0x111111,
+            roughness: 0.75,
+            metalness: 0.0,
+            side: THREE.DoubleSide
+        });
+
+        const noBaseboardWalls = new Set(['Wall2', 'Wall3', 'Wall4', 'Wall7', 'Wall8', 'Wall9', 'Wall11', 'Wall12', 'Wall13', 'Wall15', 'Wall16', 'Wall20', 'Wall21']);
+        // Wall14 shares the long left facade baseboard strip; skip interior strip there to avoid double baseboard.
+        const noInteriorBaseboardWalls = new Set([...noBaseboardWalls, 'Wall14']);
+
+        // Subtle dark strip used to ground baseboard-less partition walls.
+        const wallFootShadowMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.52,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            depthTest: true,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2
+        });
+
+        function addDrywallGapShadow(planeMesh, planeW, planeH, outward, faceOffset = 0.026) {
+            const revealH = 0.11;
+            for (const sideSign of [-1, 1]) {
+                const reveal = new THREE.Mesh(
+                    new THREE.PlaneGeometry(planeW, revealH),
+                    wallFootShadowMaterial
+                );
+                reveal.rotation.y = planeMesh.rotation.y;
+                reveal.position.copy(planeMesh.position);
+                reveal.position.y -= (planeH * 0.5) - (revealH * 0.5);
+                reveal.position.y += 0.01;
+                reveal.position.addScaledVector(outward, faceOffset * sideSign);
+                scene.add(reveal);
+            }
+        }
+
+        function addDrywallGapShadowForWallMesh(wallMesh) {
+            if (!wallMesh || !noBaseboardWalls.has(wallMesh.name)) return;
+            wallMesh.updateWorldMatrix(true, false);
+            const bbox = new THREE.Box3().setFromObject(wallMesh);
+            const size = bbox.getSize(new THREE.Vector3());
+            const minAxis = size.x < size.z ? 'x' : 'z';
+            const planeW = minAxis === 'x' ? size.z : size.x;
+            const planeH = size.y;
+            const thickness = minAxis === 'x' ? size.x : size.z;
+            const faceOffset = (thickness * 0.5) + 0.03;
+            const outward = new THREE.Vector3(Math.sin(wallMesh.rotation.y), 0, Math.cos(wallMesh.rotation.y));
+            addDrywallGapShadow(wallMesh, planeW, planeH, outward, faceOffset);
+        }
         
         const pedestalTexture = textureLoader.load('./building/pedestal.png');
         pedestalTexture.wrapS = THREE.RepeatWrapping;
@@ -945,244 +1746,11 @@
         pedestalTexture.colorSpace = THREE.SRGBColorSpace;
         pedestalTexture.anisotropy = 16;
         
-        // Create procedural stars texture
-        function createStarsTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            
-            // Dark background (00001d)
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Star color (ffe8de - warm white/beige)
-            const starColor = '#dedede';
-            
-            // Settings
-            const scale = 2;
-            const density = .1;
-            const variation = 0;
-            
-            // Generate stars
-            const numStars = Math.floor(canvas.width * canvas.height * density / 100);
-            for (let i = 0; i < numStars; i++) {
-                const x = Math.random() * canvas.width;
-                const y = Math.random() * canvas.height;
-                const radius = Math.random() * scale * 0.5 + 0.5;
-                const opacity = 0.3 + Math.random() * (1 - variation * 0.3);
-                
-                ctx.fillStyle = starColor;
-                ctx.globalAlpha = opacity;
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.globalAlpha = 1.0;
-            }
-            
-            // Add some glow to stars
-            for (let i = 0; i < numStars * 0.3; i++) {
-                const x = Math.random() * canvas.width;
-                const y = Math.random() * canvas.height;
-                const radius = Math.random() * scale * 1.5 + 1;
-                
-                const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
-                gradient.addColorStop(1, 'rgba(0, 0, 29, 0)');
-                
-                ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.LinearFilter;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            return texture;
-        }
-        
-        const tableMaterial = new THREE.MeshBasicMaterial({
-            color: 0x111111, // placeholder until stars texture is ready
-            side: THREE.DoubleSide
-        });
-        setTimeout(() => {
-            tableMaterial.map = createStarsTexture();
-            tableMaterial.color.set(0xffffff);
-            tableMaterial.needsUpdate = true;
-            needsRender = true;
-        }, 0);
-        
-        // Create procedural roman paving texture
-        function createRomanPavingTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            
-            // Mortar color (light grey)
-            ctx.fillStyle = '#f0f0f0';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Stone colors palette
-            const stoneColors = ['#9b8b77', '#a89784', '#8b7b6b', '#b5a595', '#a08070'];
-            
-            // Settings
-            const scale = 2;
-            const depth = 0.5;
-            
-            // Draw roman paving stones - rectangular pattern
-            const stoneWidth = 80 / scale;
-            const stoneHeight = 50 / scale;
-            const mortarWidth = 2;
-            
-            for (let y = 0; y < canvas.height; y += stoneHeight + mortarWidth) {
-                // Offset every other row for brick-like pattern
-                const offset = ((y / (stoneHeight + mortarWidth)) % 2) * (stoneWidth / 2);
-                for (let x = -offset; x < canvas.width; x += stoneWidth + mortarWidth) {
-                    // Random stone color
-                    const color = stoneColors[Math.floor(Math.random() * stoneColors.length)];
-                    ctx.fillStyle = color;
-                    ctx.fillRect(x, y, stoneWidth, stoneHeight);
-                    
-                    // Add shadow/depth on top and left
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-                    ctx.fillRect(x, y, stoneWidth, 2);
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-                    ctx.fillRect(x, y, 2, stoneHeight);
-                    
-                    // Add highlight on bottom and right
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-                    ctx.fillRect(x, y + stoneHeight - 2, stoneWidth, 2);
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-                    ctx.fillRect(x + stoneWidth - 2, y, 2, stoneHeight);
-                    
-                    // Add subtle variation/texture within stone
-                    for (let i = 0; i < 3; i++) {
-                        const spotX = x + Math.random() * stoneWidth;
-                        const spotY = y + Math.random() * stoneHeight;
-                        ctx.fillStyle = `rgba(0, 0, 0, ${0.05 * Math.random()})`;
-                        ctx.fillRect(spotX, spotY, 3, 3);
-                    }
-                }
-            }
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.LinearFilter;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            return texture;
-        }
-        
-        const romanPavingTexture = createRomanPavingTexture();
-        const table2Material = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            map: romanPavingTexture,
-            side: THREE.DoubleSide
-        });
-        
-        // Create procedural satin texture
-        function createSatinTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            
-            // Dark background (000014)
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Main satin color (2937ff - deep blue)
-            const satinColor = '#000000';
-            
-            // Settings
-            const scale = 200;
-            
-            // Create satin sheen effect with diagonal lines and gradients
-            for (let y = 0; y < canvas.height; y += 3 * scale) {
-                // Alternating light and dark lines for satin sheen
-                if ((y / (3 * scale)) % 2 === 0) {
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                } else {
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-                }
-                ctx.fillRect(0, y, canvas.width, 2 * scale);
-            }
-            
-            // Add fabric texture with small random variations
-            for (let i = 0; i < 2000; i++) {
-                const x = Math.random() * canvas.width;
-                const y = Math.random() * canvas.height;
-                const brightness = Math.random() * 0.3;
-                ctx.fillStyle = `rgba(0, 0, 0, ${(0.2 + brightness)})`;
-                ctx.fillRect(x, y, Math.random() * 2 + 1, 1);
-            }
-            
-            // Add subtle wave pattern for satin sheen
-            for (let x = 0; x < canvas.width; x += 40 * scale) {
-                const gradient = ctx.createLinearGradient(x, 0, x + 40 * scale, 0);
-                gradient.addColorStop(0, 'rgba(100, 150, 255, 0)');
-                gradient.addColorStop(0.5, 'rgba(100, 150, 255, 0.3)');
-                gradient.addColorStop(1, 'rgba(100, 150, 255, 0)');
-                
-                ctx.fillStyle = gradient;
-                ctx.fillRect(x, 0, 40 * scale, canvas.height);
-            }
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.LinearFilter;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            return texture;
-        }
-        
-        const satinTexture = createSatinTexture();
-        const sofaMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            map: satinTexture,
-            side: THREE.DoubleSide
-        });
-
-        // Procedural canvas/fabric weave roughness map — used by the 'fabric' frame type
-        function createFabricWeaveTexture() {
-            const size = 512;
-            const canvas = document.createElement('canvas');
-            canvas.width = size;
-            canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            // Mid-grey base (roughness map)
-            ctx.fillStyle = '#999';
-            ctx.fillRect(0, 0, size, size);
-            const tw = 6, gap = 6; // scaled with canvas (was 3/3 at 256)
-            // Warp threads (vertical)
-            for (let x = 0; x < size; x += tw + gap) {
-                ctx.fillStyle = 'rgba(40,30,20,0.38)';
-                ctx.fillRect(x, 0, tw, size);
-            }
-            // Weft threads (horizontal)
-            for (let y = 0; y < size; y += tw + gap) {
-                ctx.fillStyle = 'rgba(40,30,20,0.38)';
-                ctx.fillRect(0, y, size, tw);
-            }
-            // Subtle natural noise — density scaled with canvas area
-            for (let i = 0; i < 8000; i++) {
-                const v = Math.random() > 0.5 ? 255 : 0;
-                ctx.fillStyle = `rgba(${v},${v},${v},0.025)`;
-                ctx.fillRect(Math.random() * size, Math.random() * size, 1, 1);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            tex.magFilter = THREE.LinearFilter;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            tex.anisotropy = renderer.capabilities.maxAnisotropy;
-            return tex;
-        }
-        const fabricWeaveTexture = createFabricWeaveTexture();
-
-        // Procedural normal map that gives the fabric surface genuine 3D relief
+        // Procedural fabric normal map — generated on first fabric-frame use only.
+        let fabricNormalTexture = null;
         function createFabricNormalMap() {
             const size = 512;
-            const tw = 12; // thread cycle width in pixels — scaled with canvas (was 6 at 256)
-            // Build a heightfield: cosine bumps per thread axis, plain weave alternation
+            const tw = 12;
             const h = new Float32Array(size * size);
             for (let y = 0; y < size; y++) {
                 for (let x = 0; x < size; x++) {
@@ -1195,12 +1763,11 @@
                                               : warpH * 0.25 + weftH * 0.75;
                 }
             }
-            // Derive RGB normal map via Sobel filter on the heightfield
             const canvas2 = document.createElement('canvas');
             canvas2.width = size; canvas2.height = size;
             const ctx2 = canvas2.getContext('2d');
             const img = ctx2.createImageData(size, size);
-            const strength = 6.0; // bump intensity
+            const strength = 6.0;
             const s = size;
             const ht = (x, y) => h[((y + s) % s) * s + ((x + s) % s)];
             for (let y = 0; y < size; y++) {
@@ -1229,7 +1796,10 @@
             tex.anisotropy = renderer.capabilities.maxAnisotropy;
             return tex;
         }
-        const fabricNormalTexture = createFabricNormalMap();
+        function getFabricNormalTexture() {
+            if (!fabricNormalTexture) fabricNormalTexture = createFabricNormalMap();
+            return fabricNormalTexture;
+        }
 
         const pedestalMaterial = new THREE.MeshStandardMaterial({
             map: pedestalTexture,
@@ -1237,6 +1807,44 @@
             side: THREE.DoubleSide
         });
         
+        const WALL_PLANE_FLOOR_Y = -1.79;
+        const WALL_PLANE_CEIL_Y = 28.0;
+        const WALL_PLANE_PARTITION_H = 26.29;
+        const WALL_PLANE_FULL_H = WALL_PLANE_CEIL_Y - WALL_PLANE_FLOOR_Y;
+        // Interior partition walls — capped at partition height.
+        const WALL_PARTITION_WALLS = new Set([
+            'Wall2', 'Wall7', 'Wall8', 'Wall9',
+            'Wall12', 'Wall13', 'Wall20', 'Wall21'
+        ]);
+        const WALL_PRISM_ALIGNMENT = new Set(['Wall2', 'Wall10', 'Wall11', 'Wall12', 'Wall13']);
+        const WALL_SEAM_CRITICAL = new Set(['Wall2', 'Wall12', 'Wall13', 'Wall14', 'Wall15', 'Wall16']);
+        const buildingCenter = new THREE.Vector3();
+
+        const PICK_SIDE_OVERRIDES = { Wall16: 1, Wall8: -1, Wall9: -1 };
+
+        function pickInteriorWallSide(wallName, center, minAxis, material) {
+            if (PICK_SIDE_OVERRIDES[wallName] !== undefined) return PICK_SIDE_OVERRIDES[wallName];
+            if (material !== wallpaperMaterial) return 1;
+            const toCenter = buildingCenter.clone().sub(center);
+            return minAxis === 'x'
+                ? (toCenter.x >= 0 ? 1 : -1)
+                : (toCenter.z >= 0 ? 1 : -1);
+        }
+
+        function computeWallPlaneDimensions(wallName, rawPlaneW, rawPlaneH, isBrickMaterial) {
+            const isPrismAlignmentWall = WALL_PRISM_ALIGNMENT.has(wallName);
+            const isSeamCriticalWall = WALL_SEAM_CRITICAL.has(wallName);
+            const isPartition = WALL_PARTITION_WALLS.has(wallName);
+            const widthTrim = isPrismAlignmentWall ? 0.02 : (isSeamCriticalWall ? 0.22 : (isBrickMaterial ? 0.2 : 0.7));
+            const heightTrim = isPartition ? 0 : (isSeamCriticalWall ? 0.06 : (isBrickMaterial ? 0.05 : 0));
+            const planeW = Math.max(0.5, rawPlaneW - widthTrim);
+            const heightCap = isPartition ? WALL_PLANE_PARTITION_H : WALL_PLANE_FULL_H;
+            const planeH = isPartition
+                ? Math.min(Math.max(0.5, rawPlaneH - heightTrim), heightCap)
+                : heightCap;
+            return { planeW, planeH };
+        }
+
         function addWallPlanes(child, mat) {
             child.updateWorldMatrix(true, false);
             child.visible = false;  // Hide the actual wall
@@ -1246,17 +1854,59 @@
             const center = bbox.getCenter(new THREE.Vector3());
 
             const minAxis = size.x < size.z ? 'x' : 'z';
-            const planeW = minAxis === 'x' ? size.z : size.x;
-            const planeH = size.y;
+            const rawPlaneW = minAxis === 'x' ? size.z : size.x;
+            const rawPlaneH = size.y;
+            const isBrickWallPlane = mat === wall1Material;
+            const { planeW, planeH } = computeWallPlaneDimensions(child.name, rawPlaneW, rawPlaneH, isBrickWallPlane);
+            const FLOOR_CLIP_Y = WALL_PLANE_FLOOR_Y;
 
-            // Only create one plane on the positive side
-            const side = 1;
+            // Pick the face that points toward the gallery interior.
+            const side = pickInteriorWallSide(child.name, center, minAxis, mat);
             const planeGeom = new THREE.PlaneGeometry(planeW, planeH);
             // Clone material and apply clipping plane if it exists
             const planeMat = mat.clone();
             if (modelClippingPlane) {
                 planeMat.clippingPlanes = [...(planeMat.clippingPlanes || []), modelClippingPlane];
             }
+            if (child.name === 'Wall16' && mat === wallpaperMaterial) {
+                // These walls look cleaner with a single front face; backface shading can look smeared.
+                planeMat.side = THREE.FrontSide;
+            }
+            if (child.name === 'Wall10' && mat === wallpaperMaterial) {
+                // Wall10 has exterior facade coverage; render only inward face to avoid outside bleed-through.
+                planeMat.side = THREE.FrontSide;
+            }
+            if (child.name === 'Wall11' && mat === wall1Material) {
+                // Brick exterior should not be visible from interior/window opening side.
+                planeMat.side = THREE.FrontSide;
+            }
+            planeMat.polygonOffset = true;
+            planeMat.polygonOffsetFactor = -1;
+            planeMat.polygonOffsetUnits = -1;
+
+            // Scale texture repeat by physical wall size so each tile is the same
+            // real-world size on every wall regardless of orientation or width.
+            if (mat === wallpaperMaterial) {
+                const texelsPerUnit = 4.8 / 30;
+                const repeatX = Math.max(0.75, texelsPerUnit * planeW);
+                const repeatY = Math.max(0.75, texelsPerUnit * planeH);
+                // Rotate UV 90° on X-axis walls so the texture grain runs in the
+                // same world direction as Z-axis walls. Also swap repeat values so
+                // the wide repeat still runs along the wall width after rotation.
+                const uvRotation = minAxis === 'x' ? Math.PI / 2 : 0;
+                const rU = minAxis === 'x' ? repeatY : repeatX;
+                const rV = minAxis === 'x' ? repeatX : repeatY;
+                ['map', 'normalMap', 'roughnessMap', 'bumpMap'].forEach((key) => {
+                    const texture = planeMat[key];
+                    if (!texture) return;
+                    planeMat[key] = cloneLoadedTexture(texture);
+                    planeMat[key].repeat.set(rU, rV);
+                    planeMat[key].offset.set(0, 0);
+                    planeMat[key].center.set(0.5, 0.5);
+                    planeMat[key].rotation = uvRotation;
+                });
+            }
+
             const planeMesh = new THREE.Mesh(planeGeom, planeMat);
             planeMesh.position.copy(center);
 
@@ -1268,21 +1918,17 @@
                 planeMesh.position.z += side * (size.z / 2);
             }
 
-            if(child.name=="Wall11"){
-                planeMesh.position.x -= 1;
-                planeMesh.position.z += .3;
-            }
-            else if(child.name=="Wall2"){
+            if(child.name=="Wall2"){
                 planeMesh.position.z += .53;
                 planeMesh.position.x -= .05;
                 planeMesh.rotation.y += 0.01;
-                planeMesh.scale.set(1.02,1,1);
+                planeMesh.scale.set(1.02, 1, 1);
             }
             else if(child.name=="Wall8"){
                 planeMesh.position.z -= .2;
             }
             else if(child.name=="Wall9"){
-                planeMesh.scale.set(.8,1,1);
+                planeMesh.scale.set(.8, 1, 1);
             }
             else if(child.name=="Wall10"){
                 planeMesh.position.x += .05;
@@ -1294,8 +1940,11 @@
                     const referenceSize = 30;
                     const scaleX = planeW / referenceSize;
                     const scaleY = planeH / referenceSize;
-                    planeMat.map = planeMat.map.clone();
-                    planeMat.map.repeat.set(2 * scaleX, 3 * scaleY);
+                    ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'bumpMap'].forEach((key) => {
+                        if (!planeMat[key]) return;
+                        planeMat[key] = cloneLoadedTexture(planeMat[key]);
+                        planeMat[key].repeat.set(3 * scaleX, 4.5 * scaleY);
+                    });
                 }
                 if(child.name=="Wall1"){
                     planeMesh.position.x -= .4;
@@ -1310,7 +1959,192 @@
             else if(child.name=="Wall16"){
                 planeMesh.position.x -= .4;
             }
+
+            // Anchor bottom of plane to the floor — with planeH capped at room height
+            // the top lands exactly at the ceiling: no gap, no clip.
+            planeMesh.position.y = FLOOR_CLIP_Y + planeH * 0.5;
+
+            // All interior (wallpaper) walls get a baseboard along their base.
+            // Brick/exterior walls intentionally excluded.
+            // Wall16 has a door — no baseboard (would clip through the door rectangle).
+            const isWallpaperWall = mat === wallpaperMaterial;
+            const lacksBaseboard = isWallpaperWall && noInteriorBaseboardWalls.has(child.name);
+
+            let outward = null;
+            let boardSide = -1;
+            let boardOffset = 0.06;
+            if (isWallpaperWall) {
+                outward = new THREE.Vector3(Math.sin(planeMesh.rotation.y), 0, Math.cos(planeMesh.rotation.y));
+                // Wall10 and Wall0 face the opposite interior direction from the rest.
+                boardSide = (child.name === 'Wall10' || child.name === 'Wall0') ? 1 : -1;
+                boardOffset = (child.name === 'Wall10' || child.name === 'Wall0') ? 0.1 : 0.06;
+            }
+
+            if (mat === wallpaperMaterial && !noInteriorBaseboardWalls.has(child.name)) {
+                const boardH = 0.88;
+                const boardDepth = 0.16;
+                const along = new THREE.Vector3(Math.cos(planeMesh.rotation.y), 0, -Math.sin(planeMesh.rotation.y));
+
+                const addBaseboardSegment = (segmentLength, alongOffset = 0) => {
+                    const board = new THREE.Mesh(
+                        new THREE.BoxGeometry(segmentLength, boardH, boardDepth),
+                        blackBaseboardMaterial
+                    );
+                    board.rotation.y = planeMesh.rotation.y;
+                    board.position.copy(planeMesh.position);
+                    board.position.y -= (planeH * 0.5) - (boardH * 0.5);
+                    board.position.addScaledVector(outward, boardOffset * boardSide);
+                    board.position.addScaledVector(along, alongOffset);
+                    board.castShadow = true;
+                    board.receiveShadow = true;
+                    scene.add(board);
+                };
+
+                addBaseboardSegment(planeW, 0);
+            }
+
+            // For partition walls that intentionally have no baseboard, add a thin
+            // dark foot strip so the wall-floor intersection doesn't look sterile.
+            // Only partition-style baseboard-less walls get the dark floor reveal.
+            if (lacksBaseboard && noBaseboardWalls.has(child.name)) {
+                addDrywallGapShadow(planeMesh, planeW, planeH, outward);
+            }
+
+            // Wall14 sits close to the left facade interior skin; nudge slightly to avoid coplanar shimmer.
+            if (child.name === 'Wall14') {
+                const wall14Outward = new THREE.Vector3(Math.sin(planeMesh.rotation.y), 0, Math.cos(planeMesh.rotation.y));
+                planeMesh.position.addScaledVector(wall14Outward, 0.02);
+            }
             scene.add(planeMesh);
+            const surfaceType = mat === wallpaperMaterial ? 'interior' : 'exterior';
+            planeMesh.userData.placementSurface = surfaceType;
+            planeMesh.userData.inwardSide = side;
+            registerWallPlacementPlane(child.name, planeMesh, surfaceType);
+        }
+
+        // ─── Prism wall builder ────────────────────────────────────────────────
+        // Walls 2, 12, 13, 15 are supposed to form a closed rectangular prism.
+        // Processing them individually leads to gaps / overhangs at the corners
+        // because each plane is sized and positioned relative to its own bbox.
+        //
+        // This function computes the UNION bounding box of all 4 source meshes
+        // and places each plane exactly at the corresponding face of that box.
+        // All four planes share the same extents, so their edges meet perfectly.
+        function buildPrismWallPlanes(prismMeshes, mat) {
+            const meshEntries = Object.entries(prismMeshes);
+            if (meshEntries.length === 0) return;
+
+            // Union bounding box
+            const unionBox = new THREE.Box3();
+            for (const [, mesh] of meshEntries) {
+                mesh.updateWorldMatrix(true, false);
+                unionBox.union(new THREE.Box3().setFromObject(mesh));
+            }
+
+            const prismCenter = unionBox.getCenter(new THREE.Vector3());
+            const prismSize   = unionBox.getSize(new THREE.Vector3());
+            const FLOOR_CLIP_Y = -1.79;
+
+            for (const [wallName, mesh] of meshEntries) {
+                mesh.visible = false;
+
+                const bbox = new THREE.Box3().setFromObject(mesh);
+                const mc   = bbox.getCenter(new THREE.Vector3());
+                const ms   = bbox.getSize(new THREE.Vector3());
+
+                // Determine which axis carries the wall's thickness.
+                const minAxis = ms.x < ms.z ? 'x' : 'z';
+
+                let planeW, planeH, posX, posY, posZ, rotY;
+                planeH = prismSize.y;
+                posY   = prismCenter.y;
+
+                if (minAxis === 'x') {
+                    planeW = prismSize.z;
+                    posZ   = prismCenter.z;
+                    // Closest face = which union face this mesh represents.
+                    // Normal points OUTWARD from the prism (gallery is outside the box).
+                    const distToMax = Math.abs(mc.x - unionBox.max.x);
+                    const distToMin = Math.abs(mc.x - unionBox.min.x);
+                    if (distToMax <= distToMin) {
+                        posX = unionBox.max.x;
+                        rotY = -Math.PI / 2;  // normal → +X (outward)
+                    } else {
+                        posX = unionBox.min.x;
+                        rotY = Math.PI / 2;   // normal → −X (outward)
+                    }
+                } else {
+                    planeW = prismSize.x;
+                    posX   = prismCenter.x;
+                    const distToMax = Math.abs(mc.z - unionBox.max.z);
+                    const distToMin = Math.abs(mc.z - unionBox.min.z);
+                    if (distToMax <= distToMin) {
+                        posZ = unionBox.max.z;
+                        rotY = 0;             // normal → +Z (outward)
+                    } else {
+                        posZ = unionBox.min.z;
+                        rotY = Math.PI;       // normal → −Z (outward)
+                    }
+                }
+                // Wall2 faces the opposite direction from Wall12/13 on this prism.
+                if (wallName === 'Wall2') rotY += Math.PI;
+
+                // Partition walls — always use the full partition height so the
+                // side planes reach Y=24.5 and the top cap sits flush on them.
+                planeH = 26.29;
+                posY   = FLOOR_CLIP_Y + planeH * 0.5;
+
+                const planeMat = mat.clone();
+                if (modelClippingPlane) {
+                    planeMat.clippingPlanes = [...(planeMat.clippingPlanes || []), modelClippingPlane];
+                }
+                planeMat.side = THREE.DoubleSide;
+                planeMat.polygonOffset = true;
+                planeMat.polygonOffsetFactor = -1;
+                planeMat.polygonOffsetUnits = -1;
+
+                const geom = new THREE.PlaneGeometry(planeW, planeH);
+                const planeMesh = new THREE.Mesh(geom, planeMat);
+                planeMesh.position.set(posX, posY, posZ);
+                planeMesh.rotation.y = rotY;
+                planeMesh.name = wallName + '_prismPlane';
+                planeMesh.userData.placementSurface = 'interior';
+                planeMesh.userData.prismInterior = true;
+                // Derive inwardSide from the actual rotY so it always matches the plane normal.
+                // rotY=+π/2 → normal=(−1,0,0) → inwardSide=−1 on x-axis
+                // rotY=−π/2 → normal=(+1,0,0) → inwardSide=+1 on x-axis
+                // rotY=π    → normal=(0,0,−1) → inwardSide=−1 on z-axis
+                // rotY=0    → normal=(0,0,+1) → inwardSide=+1 on z-axis
+                const faceN = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(0, rotY, 0));
+                planeMesh.userData.inwardSide = minAxis === 'x'
+                    ? (faceN.x >= 0 ? 1 : -1)
+                    : (faceN.z >= 0 ? 1 : -1);
+                scene.add(planeMesh);
+                registerWallPlacementPlane(wallName, planeMesh, 'interior');
+
+                if (mat === wallpaperMaterial && noBaseboardWalls.has(wallName)) {
+                    const outward = new THREE.Vector3(Math.sin(planeMesh.rotation.y), 0, Math.cos(planeMesh.rotation.y));
+                    addDrywallGapShadow(planeMesh, planeW, planeH, outward);
+                }
+            }
+
+            // Re-add the prism top so Walls 2/12/13/15 are closed.
+            const PARTITION_TOP_Y = FLOOR_CLIP_Y + 26.29; // 24.5
+            const topCapMat = mat.clone();
+            if (modelClippingPlane) {
+                topCapMat.clippingPlanes = [...(topCapMat.clippingPlanes || []), modelClippingPlane];
+            }
+            topCapMat.side = THREE.DoubleSide;
+            topCapMat.polygonOffset = true;
+            topCapMat.polygonOffsetFactor = -1;
+            topCapMat.polygonOffsetUnits = -1;
+            const topCapGeom = new THREE.PlaneGeometry(prismSize.x, prismSize.z);
+            const topCapMesh = new THREE.Mesh(topCapGeom, topCapMat);
+            topCapMesh.rotation.x = -Math.PI / 2;
+            topCapMesh.position.set(prismCenter.x, PARTITION_TOP_Y, prismCenter.z);
+            topCapMesh.name = 'prism_topCap';
+            scene.add(topCapMesh);
+
         }
 
         function createBrickFacade(width = 10, height = 10, depth = 0.5) {
@@ -1325,10 +2159,11 @@
             // Helper function to create brick material with scaled repeats
             const createScaledBrickMaterial = () => {
                 const mat = wall1Material.clone();
-                if(mat.map) {
-                    mat.map = mat.map.clone();
-                    mat.map.repeat.set(2 * scaleX, 3 * scaleY);
-                }
+                ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'bumpMap'].forEach((key) => {
+                    if (!mat[key]) return;
+                    mat[key] = cloneLoadedTexture(mat[key]);
+                    mat[key].repeat.set(3 * scaleX, 4.5 * scaleY);
+                });
                 return mat;
             };
             
@@ -1367,7 +2202,7 @@
                         if (m) {
                             // Create MeshBasicMaterial preserving the texture map if it exists
                             const basicMat = new THREE.MeshBasicMaterial({
-                                map: m.map || null,
+                                map: textureHasImage(m.map) ? m.map : null,
                                 color: m.color || 0xffffff,
                                 side: THREE.DoubleSide
                             });
@@ -1398,7 +2233,7 @@
                         if (m) {
                             // Create MeshBasicMaterial preserving the texture map if it exists
                             const basicMat = new THREE.MeshBasicMaterial({
-                                map: m.map || null,
+                                map: textureHasImage(m.map) ? m.map : null,
                                 color: m.color || 0xffffff,
                                 side: THREE.DoubleSide
                             });
@@ -1413,27 +2248,14 @@
             });
             
             scene.add(clonedDoor);
-            
-            console.log('Added front door model to scene');
         }
 
         // Convert all meshes in a GLB clone to MeshBasicMaterial preserving original map/color
         function applyGLBMaterials(object, flag) {
             object.traverse((child) => {
-                if (child.isMesh && child.material) {
-                    const mats = Array.isArray(child.material) ? child.material : [child.material];
-                    const basics = mats.map(m => new THREE.MeshBasicMaterial({
-                        map: m.map || null,
-                        color: m.color ? m.color.clone() : new THREE.Color(0xffffff),
-                        side: THREE.DoubleSide
-                    }));
-                    child.material = Array.isArray(child.material) ? basics : basics[0];
-                    if(flag === false) {
-                        return;
-                    }
-                    child.castShadow = true;  // Enable shadow casting
-                    child.receiveShadow = true;  // Enable shadow receiving
-                    
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
                 }
             });
         }
@@ -1809,7 +2631,6 @@
                 }
             });
 
-            console.log('Added procedural food items to table');
         }
 
         function makePedestal(x, y, z, w, h, d, rotY) {
@@ -1819,6 +2640,7 @@
             );
             mesh.position.set(x, y + h / 2, z);
             if (rotY) mesh.rotation.y = rotY;
+            liftObjectAboveFloor(mesh, { autoFloorClamp: true });
             scene.add(mesh);
             addObjectCollider(mesh);
         }
@@ -1832,12 +2654,11 @@
             // Clone and add the backdoor model to the scene
             const clonedBackdoor = models.backdoor.clone();
             clonedBackdoor.position.set(30, 10, -142);
-            clonedBackdoor.scale.set(25, 25, 25);
+            clonedBackdoor.scale.set(25, 25, 25); // deeper Z so door frame covers baseboard ends
            // clonedBackdoor.rotation.y = 180 * (Math.PI / 180); // Rotate 180 degrees to face the correct direction
             
             applyGLBMaterials(clonedBackdoor);
             scene.add(clonedBackdoor);
-            console.log('Added backdoor model to scene');
         }
 
         function replaceWindowsWithModel(model) {
@@ -1890,45 +2711,105 @@
 
                             scene.add(clonedWindow);
                         });
-                        
-                        console.log('Added window models to:', child.name);
                     }
                 }
             });
         }
 
         function colorizeModel(model) {
+            wallPlacementMeshes.clear();
+            const modelBBox = new THREE.Box3().setFromObject(model);
+            modelBBox.getCenter(buildingCenter);
+            const modelHeight = Math.max(1e-3, modelBBox.max.y - modelBBox.min.y);
+            const floorYThreshold = modelBBox.min.y + modelHeight * 0.4;
+            const prismMeshes = {}; // Wall2/12/13/15 — built together after traversal
+
             model.traverse((child) => {
                 if (child.isMesh) {
                     const name = child.name.toLowerCase();
+                    const bbox = new THREE.Box3().setFromObject(child);
+                    const center = bbox.getCenter(new THREE.Vector3());
+                    const size = bbox.getSize(new THREE.Vector3());
+                    const minPlanar = Math.min(size.x, size.z);
+                    const isFlatAndLarge = size.x > 6 && size.z > 6 && size.y < (minPlanar * 0.35);
+                    const isLowHorizontalSlab = center.y <= floorYThreshold && size.y < Math.max(1.5, minPlanar * 0.6);
+                    const isHorizontalSlab = size.x > 1.5 && size.z > 1.5 && size.y < Math.max(1.2, minPlanar * 0.8);
+                    const isLikelyFloorByName = name.includes('floor') || name.includes('ground') || name.includes('slab') || name.includes('pavement');
+                    const isLikelyCeiling = name.includes('ceiling') || name.includes('roof') || name.includes('top');
+
+                    // Floor0 is replaced by a concrete overlay in processModelMeshes; keep it hidden here.
+                    if (child.name === 'Floor0') {
+                        child.visible = false;
+                        return;
+                    }
+
+                    // Ceiling/roof meshes are replaced by the procedural roof system.
+                    // Keeping GLB ceiling slabs causes a floating horizontal plate.
+                    if (isLikelyCeiling) {
+                        child.visible = false;
+                        return;
+                    }
+
+                    // Catch non-standard mesh names: any thin horizontal surface high in the
+                    // building is treated as ceiling residue and hidden.
+                    if ((isHorizontalSlab || isFlatAndLarge) && center.y > 20) {
+                        child.visible = false;
+                        return;
+                    }
+
+                    // GLB floor-like slabs overlap with the procedural interior/exterior floor
+                    // system and can cause camera-dependent z-fighting shimmer.
+                    // Keep only the procedural floor meshes.
+                    if (!isLikelyCeiling && (isLikelyFloorByName || isFlatAndLarge || isLowHorizontalSlab || isHorizontalSlab)) {
+                        child.visible = false;
+                        return;
+                    }
 
                     if (child.name === 'Opening0') {
                         child.material = skyBlueMaterial;
                         child.visible = true;
-                        child.scale.set(1.2, 2.3, .1); // Elongate the pedestal to better fit the opening
-                        child.position.x += 0.1; // Slightly raise the pedestal to prevent z-fighting
+                        child.scale.set(1.2, 2.3, .14); // Slightly thicker so it reads as a doorway volume
+                        // Preserve GLB orientation; forcing 90deg over-rotates this opening.
+                        // Keep centered on the wall: no manual lateral offset.
                     } else if (child.name === 'Door0' || child.name === 'Door1') {
                         child.visible = false;
                     } else if (child.name === 'Window0') {
                         child.visible = false;
-                    } else if (child.name === 'Wall3' || child.name === 'Wall4' || child.name === 'Wall5') {
+                    } else if (child.name === 'Wall3' || child.name === 'Wall4') {
                         child.visible = false;
+                    } else if (child.name === 'Wall5') {
+                        child.material = whiteMaterial;
+                        child.visible = false;
+                        addWallPlanes(child, wallpaperMaterial);
                     } else if (child.name === 'Wall7' || child.name === 'Wall8' || child.name === 'Wall9') {
                         child.material = whiteMaterial;
+                        child.visible = false;
                         addWallPlanes(child, wallpaperMaterial);
+                        if (child.name === 'Wall8' || child.name === 'Wall9') {
+                            const _entry = wallPlacementMeshes.get(child.name);
+                            if (_entry?.mesh) _entry.mesh.position.z = -89;
+                        }
                     } else if (child.name === 'Wall11') {
                         child.material = whiteMaterial;
+                        child.visible = false;
+                        child.traverse(c => { if (c.isMesh) c.visible = false; });
                         addWallPlanes(child, wallpaperMaterial);
                     }
                     else if (child.name === 'Wall16') {
                         child.material = whiteMaterial;
                         addWallPlanes(child, wallpaperMaterial);
-                    } else if (name.includes('door')/* && name.includes('wall16')*/) {
-                        child.visible = false;
                     } else if (name.includes('door')) {
                         child.material = yellowMaterial;
                     } else if (name.includes('window') || name.includes('glass')) {
                         child.material = greenMaterial;
+                    } else if (child.name === 'Wall15') {
+                        // Against exterior wall — no placement surface needed, hide GLB mesh
+                        child.visible = false;
+                        child.traverse(c => { if (c.isMesh) c.visible = false; });
+                    } else if (['Wall2', 'Wall12', 'Wall13'].includes(child.name)) {
+                        // Defer to buildPrismWallPlanes — processed together after traversal
+                        child.material = whiteMaterial;
+                        prismMeshes[child.name] = child;
                     } else if (child.name === 'Wall1' || child.name === 'Wall6') {
                         child.material = whiteMaterial;
                         addWallPlanes(child, wall1Material);
@@ -1938,12 +2819,46 @@
                     }
                 }
             });
+            buildPrismWallPlanes(prismMeshes, wallpaperMaterial);
+
+            // Remove any stray horizontal slab left above the prism partition walls.
+            const prismEntries = Object.entries(prismMeshes);
+            if (prismEntries.length > 0) {
+                const prismUnion = new THREE.Box3();
+                for (const [, mesh] of prismEntries) {
+                    mesh.updateWorldMatrix(true, false);
+                    prismUnion.union(new THREE.Box3().setFromObject(mesh));
+                }
+
+                const PARTITION_TOP_Y = -1.79 + 26.29; // 24.5
+                model.traverse((child) => {
+                    if (!child.isMesh) return;
+                    if (['Wall2', 'Wall12', 'Wall13'].includes(child.name)) return;
+
+                    const slabBox = new THREE.Box3().setFromObject(child);
+                    const slabSize = slabBox.getSize(new THREE.Vector3());
+                    const slabCenter = slabBox.getCenter(new THREE.Vector3());
+                    const slabMinPlanar = Math.min(slabSize.x, slabSize.z);
+                    const isHorizontalSlab =
+                        slabSize.x > 1.5 && slabSize.z > 1.5 &&
+                        slabSize.y < Math.max(1.2, slabMinPlanar * 0.8);
+
+                    const overlapsPrismXZ =
+                        slabBox.max.x > prismUnion.min.x && slabBox.min.x < prismUnion.max.x &&
+                        slabBox.max.z > prismUnion.min.z && slabBox.min.z < prismUnion.max.z;
+
+                    const abovePrismTop = slabCenter.y > PARTITION_TOP_Y + 0.05;
+                    if (overlapsPrismXZ && abovePrismTop) {
+                        child.visible = false;
+                    }
+                });
+            }
+
+            for (const w of manualWalls) {
+                ensureManualWallPlacementPlane(w);
+            }
         }
 
-        // =====================================================
-        // WALL VISUALIZATION FOR DEBUGGING
-        // =====================================================
-        
         // =====================================================
         // DEBUG MODE - Labels for walls, doors, windows
         // =====================================================
@@ -1951,6 +2866,131 @@
         let debugLabelsGroup = new THREE.Group();
         scene.add(debugLabelsGroup);
         let debugMode = false;
+        let layoutGuideEnabled = false;
+        const wallGuideGroup = new THREE.Group();
+        wallGuideGroup.name = 'WallLayoutGuides';
+        scene.add(wallGuideGroup);
+        const LAYOUT_GUIDE_GRID_STEP = 5;
+        const wallPlacementMeshes = new Map(); // wallName -> { mesh, area, centerDistance } interior display plane
+        const WALL_FACE_DEFAULTS = {};
+        const WALL_INWARD_SIGN_DEFAULTS = { Wall10: -1, Wall0: -1, Wall20: 1, Wall21: -1, Wall8: -1, Wall9: -1 };
+        const GUIDE_SURFACE_OFFSET = 0.25;
+        const DEFAULT_WALL_SURFACE_OFFSET = 0.16;
+        const GUIDE_LINE_LOCAL_Z = 0.08;
+
+        function registerWallPlacementPlane(wallName, planeMesh, surfaceType = 'interior') {
+            planeMesh.userData.placementSurface = surfaceType;
+            const planeW = planeMesh.geometry.parameters.width;
+            const planeH = planeMesh.geometry.parameters.height;
+            const planeArea = planeW * planeH;
+            const centerDistance = planeMesh.position.distanceTo(buildingCenter);
+            const existing = wallPlacementMeshes.get(wallName);
+            if (!existing) {
+                wallPlacementMeshes.set(wallName, { mesh: planeMesh, area: planeArea, centerDistance, surfaceType });
+                return;
+            }
+            const existingType = existing.surfaceType || existing.mesh?.userData?.placementSurface;
+            if (existingType === 'exterior' && surfaceType === 'interior') {
+                wallPlacementMeshes.set(wallName, { mesh: planeMesh, area: planeArea, centerDistance, surfaceType });
+                return;
+            }
+            if (existingType === 'interior' && surfaceType === 'exterior') {
+                return;
+            }
+            if (
+                centerDistance < existing.centerDistance - 1e-3 ||
+                (Math.abs(centerDistance - existing.centerDistance) <= 1e-3 && planeArea > existing.area + 1e-3)
+            ) {
+                wallPlacementMeshes.set(wallName, { mesh: planeMesh, area: planeArea, centerDistance, surfaceType });
+            }
+        }
+
+        function getInteriorPlacementMesh(wallName) {
+            const entry = wallPlacementMeshes.get(wallName);
+            if (!entry?.mesh) return null;
+            const surfaceType = entry.surfaceType || entry.mesh.userData?.placementSurface;
+            return surfaceType === 'interior' ? entry.mesh : null;
+        }
+
+        function computeDisplayPlaneFromWallMesh(wallName, wallMesh) {
+            wallMesh.updateWorldMatrix(true, false);
+            const bbox = new THREE.Box3().setFromObject(wallMesh);
+            const center = bbox.getCenter(new THREE.Vector3());
+            const size = bbox.getSize(new THREE.Vector3());
+            const minAxis = size.x < size.z ? 'x' : 'z';
+            const rawPlaneW = minAxis === 'x' ? size.z : size.x;
+            const rawPlaneH = size.y;
+            const { planeW, planeH } = computeWallPlaneDimensions(wallName, rawPlaneW, rawPlaneH, false);
+
+            let side = pickInteriorWallSide(wallName, center, minAxis, wallpaperMaterial);
+
+            const planeRot = new THREE.Euler(0, 0, 0);
+            if (minAxis === 'x') {
+                planeRot.y = side === 1 ? Math.PI / 2 : -Math.PI / 2;
+            } else {
+                planeRot.y = side === -1 ? Math.PI : 0;
+            }
+
+            const planePos = center.clone();
+            if (minAxis === 'x') {
+                planePos.x += side * (size.x / 2);
+            } else {
+                planePos.z += side * (size.z / 2);
+            }
+            // Keep center.y from bbox — matches original repo behaviour.
+
+            return { planeW, planeH, planePos, planeRot, center, size, minAxis };
+        }
+
+        function ensureManualWallPlacementPlane(wallMesh) {
+            const wallName = wallMesh.name;
+            wallPlacementMeshes.delete(wallName);
+            wallMesh.updateWorldMatrix(true, false);
+            const bbox = new THREE.Box3().setFromObject(wallMesh);
+            const center = bbox.getCenter(new THREE.Vector3());
+            const size = bbox.getSize(new THREE.Vector3());
+            const minAxis = size.x < size.z ? 'x' : 'z';
+            const planeW = minAxis === 'x' ? size.z : size.x;
+            const planeH = size.y;
+
+            // Place the plane on the face that points toward the building interior.
+            // Use the same autoSign logic as getWallPlacementFrame so the plane position
+            // agrees with where positionOnWall expects the wall surface to be.
+            // WALL_FACE_DEFAULTS only controls which direction art faces FROM the plane;
+            // it does not move the plane to a different physical face of the box.
+            const autoSign = minAxis === 'x'
+                ? (center.x > 0 ? -1 : 1)
+                : (center.z > 0 ? -1 : 1);
+            const side = WALL_INWARD_SIGN_DEFAULTS[wallName] !== undefined
+                ? WALL_INWARD_SIGN_DEFAULTS[wallName]
+                : autoSign;
+
+            const planeRot = new THREE.Euler(0, 0, 0);
+            if (minAxis === 'x') {
+                planeRot.y = side === 1 ? Math.PI / 2 : -Math.PI / 2;
+            } else {
+                planeRot.y = side === -1 ? Math.PI : 0;
+            }
+
+            const planePos = center.clone();
+            if (minAxis === 'x') {
+                planePos.x += side * (size.x / 2);
+            } else {
+                planePos.z += side * (size.z / 2);
+            }
+            // Keep center.y from bbox — matches original repo behaviour.
+
+            const plane = new THREE.Mesh(
+                new THREE.PlaneGeometry(planeW, planeH),
+                new THREE.MeshBasicMaterial({ visible: false })
+            );
+            plane.position.copy(planePos);
+            plane.rotation.copy(planeRot);
+            plane.name = wallName + '_placementPlane';
+            plane.userData.inwardSide = side;
+            registerWallPlacementPlane(wallName, plane, 'interior');
+        }
+
         const manualWalls = []; // Wall20, Wall21, … added programmatically
         
         function createTextTexture(text) {
@@ -2068,17 +3108,16 @@
         const pointerSpeed = 0.004;
         const _euler = new THREE.Euler(0, 0, 0, 'YXZ'); // reused — avoids per-event allocation
         
-        document.addEventListener('click', () => {
-            if (currentMode === 'game') {
-                if (!pointerLockReady) {
-                    pointerLockReady = true; // first click arms the lock
-                    return;
-                }
-                // Don't request pointer lock while an XR session is active
-                if (!renderer.xr.isPresenting) {
-                    document.body.requestPointerLock();
-                }
+        document.addEventListener('click', (event) => {
+            if (currentMode !== 'game') return;
+            if (event.target.closest('#modeSelector, #layoutGuideHud, #info, #qrModal, button, input, select, label, a')) {
+                return;
             }
+            if (!pointerLockReady) {
+                pointerLockReady = true;
+                return;
+            }
+            requestGamePointerLock();
         });
 
         let lockAcquiredAt = 0;
@@ -2086,9 +3125,11 @@
         document.addEventListener('pointerlockchange', () => {
             isLocked = !!document.pointerLockElement;
             if (isLocked) {
-                lockAcquiredAt = performance.now(); // Record time to suppress post-lock inertia
+                lockAcquiredAt = performance.now();
                 document.getElementById('info').style.opacity = '0.3';
             } else {
+                pointerLockExitAt = performance.now();
+                pointerLockReady = false;
                 document.getElementById('info').style.opacity = '1';
             }
         });
@@ -2725,57 +3766,99 @@
             needsRender = true;
         });
 
-        // Create brick facades for the 4 sides of the building
-        const frontFacade = createBrickFacade(46.6, 30, 0.5);
-        frontFacade.position.set(-20.38, 12.5, 32.8);
-        scene.add(frontFacade);
-        addObjectCollider(frontFacade);
+        function initExteriorFacades() {
+            if (exteriorFacadesAdded) return;
+            exteriorFacadesAdded = true;
 
-        const backFacade = createBrickFacade(85.35, 30, 0.02);
-        backFacade.position.set(-.9, 12.5, -142.5);
-        backFacade.rotation.y = Math.PI;
-        scene.add(backFacade);
-        addObjectCollider(backFacade);
+            const exteriorFacadeHeight = 31;
+            const exteriorFacadeCenterY = 12.9;
 
-        const leftFacade = createBrickFacade(175.5, 30, 0.5);
-        leftFacade.position.set(-43.6, 12.5, -54.7);
-        leftFacade.rotation.y = -Math.PI/2;
-        scene.add(leftFacade);
-        addObjectCollider(leftFacade);
+            const frontFacade = createBrickFacade(46.6, exteriorFacadeHeight, 0.5);
+            frontFacade.position.set(-20.38, exteriorFacadeCenterY, 32.8);
+            scene.add(frontFacade);
+            addObjectCollider(frontFacade);
 
-        const rightFacade = createBrickFacade(185.8, 30, 0.2);
-        rightFacade.position.set(41.4, 12.5, -49.45);
-        rightFacade.rotation.y = Math.PI / 2;
-        scene.add(rightFacade);
-        addObjectCollider(rightFacade);
+            const backFacade = createBrickFacade(85.35, exteriorFacadeHeight, 0.02);
+            backFacade.position.set(-.9, exteriorFacadeCenterY, -142.5);
+            backFacade.rotation.y = Math.PI;
+            scene.add(backFacade);
+            addObjectCollider(backFacade);
+
+            const leftFacade = createBrickFacade(175.5, exteriorFacadeHeight, 0.5);
+            leftFacade.position.set(-43.6, exteriorFacadeCenterY, -54.7);
+            leftFacade.rotation.y = -Math.PI/2;
+            scene.add(leftFacade);
+            addObjectCollider(leftFacade);
+
+            const rightFacade = createBrickFacade(185.8, exteriorFacadeHeight, 0.2);
+            rightFacade.position.set(41.4, exteriorFacadeCenterY, -49.45);
+            rightFacade.rotation.y = Math.PI / 2;
+            scene.add(rightFacade);
+            addObjectCollider(rightFacade);
+
+            addExteriorBaseboard(46.6, exteriorFacadeHeight, 0.5, frontFacade.position, frontFacade.rotation.y);
+            addExteriorBaseboard(85.35, exteriorFacadeHeight, 0.02, backFacade.position, backFacade.rotation.y);
+            addExteriorBaseboard(175.5, exteriorFacadeHeight, 0.5, leftFacade.position, leftFacade.rotation.y, [-1]);
+            addExteriorBaseboard(185.8, exteriorFacadeHeight, 0.2, rightFacade.position, rightFacade.rotation.y);
+        }
+
+        // Exterior black baseboard (about 4") along facade bottoms.
+        const baseboardMaterial = new THREE.MeshStandardMaterial({
+            color: 0x111111,
+            roughness: 0.75,
+            metalness: 0.0,
+            side: THREE.DoubleSide
+        });
+
+        function addExteriorBaseboard(length, wallHeight, wallDepth, wallPos, wallRotY, dirs = [-1]) {
+            const baseboardHeight = 0.88;
+            const baseboardDepth = 0.22;
+            const outward = new THREE.Vector3(Math.sin(wallRotY), 0, Math.cos(wallRotY));
+            const offset = (wallDepth * 0.5) + (baseboardDepth * 0.5) + 0.08;
+            const baseY = Math.max(
+                wallPos.y - (wallHeight * 0.5) + (baseboardHeight * 0.5) + 0.12,
+                -1.65
+            );
+
+            dirs.forEach((dir) => {
+                const board = new THREE.Mesh(
+                    new THREE.BoxGeometry(length, baseboardHeight, baseboardDepth),
+                    baseboardMaterial
+                );
+                board.rotation.y = wallRotY;
+                board.position.set(
+                    wallPos.x + outward.x * offset * dir,
+                    baseY,
+                    wallPos.z + outward.z * offset * dir
+                );
+                board.castShadow = true;
+                board.receiveShadow = true;
+                scene.add(board);
+            });
+        }
 
         // ── Manual walls ─────────────────────────────────────────────────────
         // Adjust position / rotation / scale below to place each wall.
         (function addManualWalls() {
             const wallMat = wallpaperMaterial.clone();
 
-            const wall20 = new THREE.Mesh(new THREE.BoxGeometry(65, 30, 4), wallMat.clone());
+            const wall20 = new THREE.Mesh(new THREE.BoxGeometry(65, 26.29, 4), wallMat.clone());
             wall20.name = 'Wall20';
-            wall20.position.set(7, 13, -87);  
-            wall20.rotation.set(0, 0, 0);    
+            wall20.position.set(7, 11.36, -87);
+            wall20.rotation.set(0, 0, 0);
             scene.add(wall20);
+            addDrywallGapShadowForWallMesh(wall20);
             addObjectCollider(wall20);
             manualWalls.push(wall20);
 
-            const wall21 = new THREE.Mesh(new THREE.BoxGeometry(42, 30, 3.4), wallMat.clone());
+            const wall21 = new THREE.Mesh(new THREE.BoxGeometry(42, 26.29, 3.4), wallMat.clone());
             wall21.name = 'Wall21';
-            wall21.position.set(-4, 13, -110);   // ← adjust
+            wall21.position.set(-4, 11.36, -110);   // ← adjust
             wall21.rotation.set(0, 90 * Math.PI / 180, 0);     // ← adjust
             scene.add(wall21);
+            addDrywallGapShadowForWallMesh(wall21);
             addObjectCollider(wall21);
             manualWalls.push(wall21);
-
-
-             const wallHidden = new THREE.Mesh(new THREE.BoxGeometry(64.5, 0.3, 8.4), wallMat.clone());
-            wallHidden.name = 'WallHidden';
-            wallHidden.position.set(-11, 27, -19);  
-            wallHidden.rotation.set(0, 0, 0);    
-            scene.add(wallHidden);
         })();
         // ─────────────────────────────────────────────────────────────────────
 
@@ -2789,74 +3872,674 @@
             // No per-item spotlights - using gallery-wide lighting instead
         }
 
+        function getItemScaleVec(item) {
+            const s = item?.scale;
+            if (typeof s === 'number') {
+                return { x: s, y: s, z: s };
+            }
+            return {
+                x: s?.x ?? 1,
+                y: s?.y ?? 1,
+                z: s?.z ?? 1
+            };
+        }
+
+        function getItemRotationVec(item) {
+            const r = item?.rotation || {};
+            return {
+                x: r.x ?? 0,
+                y: r.y ?? 0,
+                z: r.z ?? 0
+            };
+        }
+
+        function getItemPositionVec(item) {
+            const p = item?.position || {};
+            return {
+                x: p.x ?? 0,
+                y: p.y ?? 0,
+                z: p.z ?? 0
+            };
+        }
+
+        let mediaPlaybackUnlockBound = false;
+        function ensureMediaPlaybackUnlocked() {
+            if (mediaPlaybackUnlockBound) return;
+            mediaPlaybackUnlockBound = true;
+
+            const resumeAllMedia = () => {
+                if (audioListener?.context?.state === 'suspended') {
+                    audioListener.context.resume().then(() => {
+                        // Re-set volumes after context resumes so positional audio is audible
+                        for (const pa of positionalAudios) {
+                            if (pa._baseVolume !== undefined) {
+                                pa.setVolume(currentMode === 'game' ? pa._baseVolume : 0);
+                            }
+                        }
+                    });
+                }
+                for (const vo of videoObjects) {
+                    vo.video.play().catch(() => {});
+                }
+            };
+
+            document.addEventListener('click', resumeAllMedia, { once: true });
+            document.addEventListener('keydown', resumeAllMedia, { once: true });
+        }
+
         function getWallMesh(wallName) {
             if (!wallName || wallName === 'none') return null;
-            // Check manually-added walls (Wall20, Wall21, …) first
+            // Preserve original authoring behavior: use source GLB walls for placement.
+            // Replacement planes are visual-only and may have different offsets/dimensions.
+            // Check manually-added walls (Wall20, Wall21, …) first.
             const manual = manualWalls.find(w => w.name === wallName);
             if (manual) return manual;
             if (!modelScene) return null;
             let wallMesh = null;
             modelScene.traverse(child => { if (child.name === wallName) wallMesh = child; });
+            if (wallMesh) return wallMesh;
+            const placementWall = wallPlacementMeshes.get(wallName);
+            if (placementWall?.mesh) return placementWall.mesh;
             return wallMesh;
+        }
+
+        function getWallPlacementFrame(wallName, options = {}) {
+            if (!wallName || wallName === 'none') return null;
+
+            const wallMesh = getWallMesh(wallName);
+            if (!wallMesh) return null;
+
+            const faceMesh = getInteriorPlacementMesh(wallName);
+            let planeW, planeH, planePos, planeRot;
+            let minAxis, alongAxis, center, size;
+
+            if (faceMesh) {
+                planeW = faceMesh.geometry.parameters.width;
+                planeH = faceMesh.geometry.parameters.height;
+                planePos = faceMesh.position.clone();
+                planeRot = faceMesh.rotation.clone();
+
+                // Derive minAxis from the plane normal — the axis the plane faces along.
+                const faceNormal = new THREE.Vector3(0, 0, 1).applyEuler(planeRot);
+                // The axis with the largest absolute normal component is the thin (depth) axis.
+                minAxis = Math.abs(faceNormal.x) > Math.abs(faceNormal.z) ? 'x' : 'z';
+                alongAxis = minAxis === 'x' ? 'z' : 'x';
+
+                // Use planePos as center — art and grid origin is the registered plane center.
+                center = planePos.clone();
+                size = new THREE.Vector3(planeW, planeH, planeW); // approximate, not used for placement
+            } else {
+                wallMesh.updateWorldMatrix(true, false);
+                const bbox = new THREE.Box3().setFromObject(wallMesh);
+                center = bbox.getCenter(new THREE.Vector3());
+                size = bbox.getSize(new THREE.Vector3());
+                minAxis = size.x < size.z ? 'x' : 'z';
+                alongAxis = minAxis === 'x' ? 'z' : 'x';
+
+                const computed = computeDisplayPlaneFromWallMesh(wallName, wallMesh);
+                planeW = computed.planeW;
+                planeH = computed.planeH;
+                planePos = computed.planePos;
+                planeRot = computed.planeRot;
+                center = planePos.clone();
+            }
+
+            // Determine the inward sign from the plane face normal component on minAxis.
+            // For the fallback path (no faceMesh), use autoSign or WALL_INWARD_SIGN_DEFAULTS.
+            let inwardBaseSign;
+            if (faceMesh) {
+                const faceNormal = new THREE.Vector3(0, 0, 1).applyEuler(planeRot);
+                const axisComponent = minAxis === 'x' ? faceNormal.x : faceNormal.z;
+                inwardBaseSign = axisComponent >= 0 ? 1 : -1;
+            } else {
+                const autoSign = minAxis === 'x'
+                    ? (center.x > 0 ? -1 : 1)
+                    : (center.z > 0 ? -1 : 1);
+                inwardBaseSign = WALL_INWARD_SIGN_DEFAULTS[wallName] !== undefined
+                    ? WALL_INWARD_SIGN_DEFAULTS[wallName]
+                    : autoSign;
+            }
+            const effectiveFace = options.face !== undefined
+                ? options.face
+                : (WALL_FACE_DEFAULTS[wallName] ?? 1);
+            const inwardSign = (effectiveFace === -1) ? -inwardBaseSign : inwardBaseSign;
+
+            const isPrismWall = faceMesh?.userData?.prismInterior === true ||
+                ['Wall2', 'Wall12', 'Wall13'].includes(wallName);
+
+            // Derive inwardNormal from the plane rotation and force it to agree with inwardSign.
+            const inwardNormal = new THREE.Vector3(0, 0, 1).applyEuler(planeRot);
+            {
+                const axisVec = minAxis === 'x'
+                    ? new THREE.Vector3(inwardSign, 0, 0)
+                    : new THREE.Vector3(0, 0, inwardSign);
+                if (inwardNormal.dot(axisVec) < 0) inwardNormal.negate();
+            }
+
+            const guideOffset = isPrismWall ? 0.2 : GUIDE_SURFACE_OFFSET;
+            const guideSurfacePos = planePos.clone().addScaledVector(inwardNormal, guideOffset);
+            const isPartition = WALL_PARTITION_WALLS.has(wallName);
+            const gridWorldYMin = WALL_PLANE_FLOOR_Y;
+            const gridWorldYMax = isPartition
+                ? WALL_PLANE_FLOOR_Y + WALL_PLANE_PARTITION_H
+                : WALL_PLANE_CEIL_Y;
+
+            // Use the registered plane center as the coordinate origin.
+            // planePos IS the visible wall surface center, so art at {x:0,y:0} lands here,
+            // the grid crosshair sits here, and the HUD reports offsets from here.
+            // This eliminates drift between the GLB bbox center and the actual plane position.
+            const origin = planePos.clone();
+            // originAlong/originY are always 0 — the plane IS centered on the surface.
+            const originAlong = 0;
+            const originY = 0;
+
+            return {
+                wallName,
+                wallMesh,
+                center: origin,   // expose as center so positionOnWall uses planePos
+                size,
+                minAxis,
+                alongAxis,
+                inwardSign,
+                inwardNormal,
+                planeW,
+                planeH,
+                planePos,
+                planeRot,
+                guideSurfacePos,
+                gridWorldYMin,
+                gridWorldYMax,
+                alongHalf: planeW / 2,
+                heightHalf: planeH / 2,
+                originAlong,
+                originY,
+                surfaceOffset: DEFAULT_WALL_SURFACE_OFFSET
+            };
+        }
+
+        function resolveWallPlacementData(item) {
+            const frame = getWallPlacementFrame(item?.wall, { face: item?.face });
+            if (!frame) return null;
+            return {
+                wallMesh: frame.wallMesh,
+                bbox: frame.bbox,
+                center: frame.center,
+                size: frame.size,
+                minAxis: frame.minAxis,
+                inwardSign: frame.inwardSign,
+                wallName: frame.wallName
+            };
+        }
+
+        function collectPlacableWallNames() {
+            for (const w of manualWalls) {
+                ensureManualWallPlacementPlane(w);
+            }
+            const names = new Set();
+            for (const wallName of wallPlacementMeshes.keys()) {
+                if (getInteriorPlacementMesh(wallName)) names.add(wallName);
+            }
+            return [...names].sort((a, b) => {
+                const na = parseInt(a.replace(/\D/g, ''), 10) || 0;
+                const nb = parseInt(b.replace(/\D/g, ''), 10) || 0;
+                return na - nb;
+            });
+        }
+
+        function disposeWallGuideGroup() {
+            wallGuideGroup.traverse(obj => {
+                if (obj.isMesh) {
+                    obj.geometry?.dispose();
+                    if (obj.material?.map) obj.material.map.dispose();
+                    obj.material?.dispose();
+                }
+                if (obj.isLine || obj.isLineSegments) {
+                    obj.geometry?.dispose();
+                    obj.material?.dispose();
+                }
+                if (obj.isSprite) {
+                    if (obj.material?.map) obj.material.map.dispose();
+                    obj.material?.dispose();
+                }
+            });
+            wallGuideGroup.clear();
+        }
+
+        function planeLocalToWorld(planePos, planeRot, localX, localY, localZ, target) {
+            target.set(localX, localY, localZ);
+            target.applyEuler(planeRot);
+            target.add(planePos);
+            return target;
+        }
+
+        function buildWallGuideLineGrid(frame) {
+            const { alongHalf, heightHalf, originAlong, originY, planePos, gridWorldYMin, gridWorldYMax } = frame;
+            const step = LAYOUT_GUIDE_GRID_STEP;
+            const verts = [];
+            const pushSeg = (x0, y0, x1, y1, z = GUIDE_LINE_LOCAL_Z) => { verts.push(x0, y0, z, x1, y1, z); };
+
+            // Vertical lines — counted in steps from the origin along-axis.
+            const metaMinAlong = -alongHalf - originAlong;
+            const metaMaxAlong = alongHalf - originAlong;
+            for (let metaAlong = Math.floor(metaMinAlong / step) * step; metaAlong <= Math.ceil(metaMaxAlong / step) * step; metaAlong += step) {
+                const lx = metaAlong + originAlong;
+                if (lx < -alongHalf - 0.01 || lx > alongHalf + 0.01) continue;
+                const major = Math.abs(metaAlong) < 0.01;
+                pushSeg(lx, -heightHalf, lx, heightHalf);
+                if (major) {
+                    pushSeg(lx - 0.4, originY, lx + 0.4, originY);
+                }
+            }
+
+            // Horizontal lines — anchored to shared world-Y ticks so lines align across all
+            // walls at the same floor-relative heights. localY converts world-Y into the
+            // surface group's local Y space (surface.position.y = planePos.y).
+            for (let worldY = gridWorldYMin; worldY <= gridWorldYMax + 0.001; worldY += step) {
+                const ly = worldY - planePos.y;
+                if (ly < -heightHalf - 0.01 || ly > heightHalf + 0.01) continue;
+                // metaY is what goes in position.y in meta.json to place art at this height.
+                const metaY = worldY - frame.center.y;
+                const major = Math.abs(metaY) < 0.01;
+                pushSeg(-alongHalf, ly, alongHalf, ly);
+                if (major) {
+                    pushSeg(originAlong - 0.4, ly, originAlong + 0.4, ly);
+                }
+            }
+
+            pushSeg(originAlong - 1.0, originY, originAlong + 1.0, originY);
+            pushSeg(originAlong, originY - 1.0, originAlong, originY + 1.0);
+            for (let i = 0; i < 12; i++) {
+                const a0 = (i / 12) * Math.PI * 2;
+                const a1 = ((i + 1) / 12) * Math.PI * 2;
+                const r = 0.75;
+                pushSeg(
+                    originAlong + Math.cos(a0) * r, originY + Math.sin(a0) * r,
+                    originAlong + Math.cos(a1) * r, originY + Math.sin(a1) * r
+                );
+            }
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+            const grid = new THREE.LineSegments(
+                geom,
+                new THREE.LineBasicMaterial({
+                    color: 0x66eeff,
+                    transparent: true,
+                    opacity: 0.92,
+                    depthTest: true,
+                    depthWrite: false
+                })
+            );
+            const originGeom = new THREE.BufferGeometry();
+            originGeom.setAttribute('position', new THREE.Float32BufferAttribute([
+                originAlong - 1.0, originY, GUIDE_LINE_LOCAL_Z + 0.02, originAlong + 1.0, originY, GUIDE_LINE_LOCAL_Z + 0.02,
+                originAlong, originY - 1.0, GUIDE_LINE_LOCAL_Z + 0.02, originAlong, originY + 1.0, GUIDE_LINE_LOCAL_Z + 0.02
+            ], 3));
+            const originCross = new THREE.LineSegments(
+                originGeom,
+                new THREE.LineBasicMaterial({
+                    color: 0xffe066,
+                    transparent: true,
+                    opacity: 1,
+                    depthTest: true,
+                    depthWrite: false
+                })
+            );
+            const group = new THREE.Group();
+            group.add(grid);
+            group.add(originCross);
+            return group;
+        }
+
+        function createGuideFlatLabel(text, width = 4.2, height = 1.05) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = 'bold 52px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = '#000000';
+            ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+            ctx.fillStyle = '#ffff66';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            return new THREE.Mesh(
+                new THREE.PlaneGeometry(width, height),
+                new THREE.MeshBasicMaterial({
+                    map: texture,
+                    transparent: true,
+                    depthTest: true,
+                    depthWrite: false,
+                    side: THREE.DoubleSide
+                })
+            );
+        }
+
+        function addOriginAxesArrows(gridRoot, frame) {
+            const { originAlong, originY, alongAxis, minAxis } = frame;
+            const z = GUIDE_LINE_LOCAL_Z + 0.08;
+            const SHAFT_LEN = 3.5;
+            const SHAFT_R   = 0.09;
+            const HEAD_LEN  = 0.75;
+            const HEAD_R    = 0.22;
+            const LABEL_OFF = 0.9; // extra gap beyond arrow tip for label
+
+            // axis: { dir [x,y,z], color hex, label string }
+            const hAxis = alongAxis === 'x' ? 'x' : 'z';
+            const depthAxis = minAxis; // the axis perpendicular to the wall face
+            const axes = [
+                { dir: [ 1,  0, 0], color: 0xff4444, label: `${hAxis}+` },
+                { dir: [-1,  0, 0], color: 0xff8888, label: `${hAxis}-` },
+                { dir: [ 0,  1, 0], color: 0x44ff44, label: 'y+' },
+                { dir: [ 0, -1, 0], color: 0x88ff88, label: 'y-' },
+                { dir: [ 0,  0, 1], color: 0x44aaff, label: `${depthAxis}+ (depth)` },
+            ];
+
+            axes.forEach(({ dir, color, label }) => {
+                const mat = new THREE.MeshBasicMaterial({
+                    color,
+                    transparent: true,
+                    opacity: 0.92,
+                    depthTest: true,
+                    depthWrite: false
+                });
+
+                // Shaft
+                const shaft = new THREE.Mesh(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, SHAFT_LEN, 8), mat);
+                // Cone head at tip
+                const head = new THREE.Mesh(new THREE.ConeGeometry(HEAD_R, HEAD_LEN, 8), mat);
+
+                // Default CylinderGeometry/ConeGeometry points along +Y.
+                // Rotate so it points along dir, then translate to correct position.
+                const tipDist = SHAFT_LEN + HEAD_LEN;
+                const [dx, dy, dz] = dir;
+
+                if (dx !== 0) {
+                    shaft.rotation.z = -Math.PI / 2 * dx;
+                    head.rotation.z  = -Math.PI / 2 * dx;
+                    shaft.position.set(originAlong + dx * SHAFT_LEN / 2, originY, z);
+                    head.position.set( originAlong + dx * tipDist,       originY, z);
+                } else if (dz !== 0) {
+                    shaft.rotation.x = Math.PI / 2;
+                    head.rotation.x  = Math.PI / 2;
+                    shaft.position.set(originAlong, originY, z + dz * SHAFT_LEN / 2);
+                    head.position.set( originAlong, originY, z + dz * tipDist);
+                } else {
+                    // y-axis — default orientation, just translate
+                    shaft.position.set(originAlong, originY + dy * SHAFT_LEN / 2, z);
+                    head.position.set( originAlong, originY + dy * tipDist,       z);
+                }
+
+                gridRoot.add(shaft);
+                gridRoot.add(head);
+
+                // Label at tip
+                const labelMesh = createGuideFlatLabel(label, 2.8, 0.9);
+                if (dx !== 0) {
+                    labelMesh.position.set(originAlong + dx * (tipDist + LABEL_OFF), originY + 1.2, z);
+                } else if (dz !== 0) {
+                    labelMesh.position.set(originAlong + 1.8, originY + 1.2, z + dz * (tipDist + LABEL_OFF));
+                } else {
+                    labelMesh.position.set(originAlong + 1.8, originY + dy * (tipDist + LABEL_OFF), z);
+                }
+                gridRoot.add(labelMesh);
+            });
+        }
+
+        function addWallGuideGridLabels(gridRoot, frame) {
+            const { alongHalf, heightHalf, originAlong, originY, alongAxis } = frame;
+            const step = LAYOUT_GUIDE_GRID_STEP;
+            const z = GUIDE_LINE_LOCAL_Z + 0.05;
+            const labelY = -heightHalf + 1.4;
+
+            // Horizontal axis labels (along the wall width).
+            for (let metaAlong = Math.ceil((-alongHalf - originAlong) / step) * step; metaAlong <= Math.floor((alongHalf - originAlong) / step) * step; metaAlong += step) {
+                if (Math.abs(metaAlong) < 0.01) continue;
+                const lx = metaAlong + originAlong;
+                const label = createGuideFlatLabel(`${alongAxis}${metaAlong > 0 ? '+' : ''}${Math.round(metaAlong)}`);
+                label.position.set(lx, labelY, z);
+                gridRoot.add(label);
+            }
+
+            // Vertical axis labels — mirror world-Y anchored horizontal lines so each label
+            // sits on its line and reads the meta.json y value (worldY - center.y).
+            for (let worldY = frame.gridWorldYMin; worldY <= frame.gridWorldYMax + 0.001; worldY += step) {
+                const ly = worldY - frame.planePos.y;
+                if (ly < -heightHalf + 0.01 || ly > heightHalf - 0.01) continue;
+                const metaY = worldY - frame.center.y;
+                if (Math.abs(metaY) < 0.01) continue;
+                const label = createGuideFlatLabel(`y${metaY > 0 ? '+' : ''}${Math.round(metaY)}`);
+                label.position.set(-alongHalf + 1.5, ly, z);
+                gridRoot.add(label);
+            }
+
+            const originLabel = createGuideFlatLabel('0,0', 4.8, 1.2);
+            originLabel.position.set(originAlong, originY + 1.8, z);
+            gridRoot.add(originLabel);
+        }
+
+        function createGuideNameLabel(worldPos, text) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = 'bold 56px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = 12;
+            ctx.strokeStyle = '#000000';
+            ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+            ctx.fillStyle = '#7dffcb';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthTest: true,
+                depthWrite: false
+            }));
+            sprite.position.copy(worldPos);
+            sprite.scale.set(12, 3, 1);
+            return sprite;
+        }
+
+        function createWallGuideForWall(wallName) {
+            const frame = getWallPlacementFrame(wallName);
+            if (!frame) return null;
+
+            const {
+                center, planeW, planeH, planeRot, guideSurfacePos,
+                inwardNormal, minAxis, inwardSign,
+                originAlong, originY, alongHalf, heightHalf
+            } = frame;
+
+            const group = new THREE.Group();
+            group.name = 'WallGuide_' + wallName;
+
+            // Build a rotation so the guide surface's local +Z faces the art side (inwardSign direction).
+            // planeRot puts local +Z along the plane face normal; if that disagrees with inwardNormal
+            // (e.g. Wall10 where the plane faces +X but art goes on the -X side), rotate 180° around Y.
+            const guideRot = planeRot.clone();
+            const planeLocalZ = new THREE.Vector3(0, 0, 1).applyEuler(planeRot);
+            const artAxisVec = minAxis === 'x'
+                ? new THREE.Vector3(inwardSign, 0, 0)
+                : new THREE.Vector3(0, 0, inwardSign);
+            if (planeLocalZ.dot(artAxisVec) < 0) {
+                guideRot.y += Math.PI;
+            }
+
+            const surface = new THREE.Group();
+            surface.position.copy(guideSurfacePos);
+            surface.rotation.copy(guideRot);
+
+            const gridRoot = new THREE.Group();
+            gridRoot.add(buildWallGuideLineGrid(frame));
+            addOriginAxesArrows(gridRoot, frame);
+
+            const pickPlane = new THREE.Mesh(
+                new THREE.PlaneGeometry(planeW, planeH),
+                new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+            );
+            pickPlane.userData.wallGuide = frame;
+            gridRoot.add(pickPlane);
+
+            addWallGuideGridLabels(gridRoot, frame);
+            surface.add(gridRoot);
+            group.add(surface);
+
+            const namePos = new THREE.Vector3(center.x, frame.gridWorldYMax + 3.5, center.z);
+            group.add(createGuideNameLabel(namePos, wallName));
+
+            return group;
+        }
+
+        function buildWallPlacementGuides() {
+            disposeWallGuideGroup();
+            if (!layoutGuideEnabled) {
+                wallGuideGroup.visible = false;
+                return;
+            }
+
+            wallGuideGroup.visible = true;
+            for (const wallName of collectPlacableWallNames()) {
+                const guide = createWallGuideForWall(wallName);
+                if (guide) wallGuideGroup.add(guide);
+            }
+        }
+
+        function wallHitToMetaPosition(hitPoint, guideData) {
+            const { center } = guideData;
+            const round1 = (v) => Math.round(v * 10) / 10;
+            return {
+                x: round1(hitPoint.x - center.x),
+                y: round1(hitPoint.y - center.y),
+                z: round1(hitPoint.z - center.z)
+            };
+        }
+
+        const layoutGuideRaycaster = new THREE.Raycaster();
+        const layoutGuidePointer = new THREE.Vector2();
+
+        function updateLayoutGuideHud(clientX, clientY) {
+            if (!layoutGuideEnabled || !layoutGuideHud) return;
+
+            layoutGuidePointer.x = (clientX / window.innerWidth) * 2 - 1;
+            layoutGuidePointer.y = -(clientY / window.innerHeight) * 2 + 1;
+            layoutGuideRaycaster.setFromCamera(layoutGuidePointer, camera);
+            const hits = layoutGuideRaycaster.intersectObjects(wallGuideGroup.children, true);
+            if (!hits.length) {
+                layoutGuideHud.innerHTML = '<strong>Layout Guide</strong><br>Point at a wall grid to read coordinates.';
+                return;
+            }
+
+            const hit = hits[0];
+            const frame = hit.object.userData.wallGuide;
+            if (!frame) return;
+            const pos = wallHitToMetaPosition(hit.point, frame);
+            // Clarify which axis label carries the horizontal offset for this wall.
+            const hAxis = frame.alongAxis; // 'x' or 'z' — the wall-width axis
+            layoutGuideHud.innerHTML =
+                `<strong>${frame.wallName}</strong><br>` +
+                `"wall": "${frame.wallName}",<br>` +
+                `"position": { "x": ${pos.x}, "y": ${pos.y}, "z": ${pos.z} }<br>` +
+                `<span style="color:#8de9ff">0,0 = wall center &nbsp;|&nbsp; horizontal → ${hAxis} &nbsp;|&nbsp; vertical → y &nbsp;|&nbsp; grid step = ${LAYOUT_GUIDE_GRID_STEP}</span>`;
+        }
+
+        document.addEventListener('mousemove', (event) => {
+            if (layoutGuideEnabled) updateLayoutGuideHud(event.clientX, event.clientY);
+        });
+
+        function ensureObjectInFrontOfWall(object, wallData) {
+            if (!object || !wallData) return;
+            object.updateWorldMatrix(true, true);
+            const objBox = new THREE.Box3().setFromObject(object);
+            const axis = wallData.minAxis;
+            // center is now planePos — the wall face is at center[axis] exactly.
+            const wallFace = wallData.center[axis];
+            const objNearFace = wallData.inwardSign > 0 ? objBox.min[axis] : objBox.max[axis];
+            const gap = wallData.inwardSign > 0 ? (objNearFace - wallFace) : (wallFace - objNearFace);
+            const minGap = 0.03;
+
+            if (gap < minGap) {
+                object.position[axis] += wallData.inwardSign * (minGap - gap + 0.001);
+            }
         }
 
         function positionOnWall(object, item) {
             const DEG2RAD = Math.PI / 180;
+            const itemPos = getItemPositionVec(item);
+            const itemRot = getItemRotationVec(item);
             if (item.wall === 'none' || !item.wall) {
                 // Direct positioning (e.g., on floor)
-                object.position.set(item.position.x, item.position.y, item.position.z);
-                object.rotation.set(item.rotation.x * DEG2RAD, item.rotation.y * DEG2RAD, item.rotation.z * DEG2RAD);
+                object.position.set(itemPos.x, itemPos.y, itemPos.z);
+                object.rotation.set(itemRot.x * DEG2RAD, itemRot.y * DEG2RAD, itemRot.z * DEG2RAD);
                 return;
             }
 
-            const wallMesh = getWallMesh(item.wall);
-            if (!wallMesh) {
+            const frame = getWallPlacementFrame(item.wall, { face: item.face });
+            if (!frame) {
                 console.warn('Wall not found:', item.wall);
-                object.position.set(item.position.x, item.position.y, item.position.z);
-                object.rotation.set(item.rotation.x * DEG2RAD, item.rotation.y * DEG2RAD, item.rotation.z * DEG2RAD);
+                object.position.set(itemPos.x, itemPos.y, itemPos.z);
+                object.rotation.set(itemRot.x * DEG2RAD, itemRot.y * DEG2RAD, itemRot.z * DEG2RAD);
                 return;
             }
 
-            wallMesh.updateWorldMatrix(true, false);
-            const bbox = new THREE.Box3().setFromObject(wallMesh);
-            const center = bbox.getCenter(new THREE.Vector3());
-            const size = bbox.getSize(new THREE.Vector3());
-            
-            const minAxis = size.x < size.z ? 'x' : 'z';
-            const autoSign = minAxis === 'x'
-                ? (center.x > 0 ? -1 : 1)
-                : (center.z > 0 ? -1 : 1);
-            // item.face: 1 = default inward face, -1 = opposite face
-            // Some walls default to the opposite face (e.g. Wall20 faces outward by default)
-            const wallFaceDefaults = { Wall20: -1, Wall21: -1 };
-            const effectiveFace = item.face !== undefined ? item.face : (wallFaceDefaults[item.wall] ?? 1);
-            const inwardSign = (effectiveFace === -1) ? -autoSign : autoSign;
-            
+            const { center, minAxis, inwardSign } = frame;
+            const surfaceOffset = Number.isFinite(item.surfaceOffset) ? item.surfaceOffset : frame.surfaceOffset;
+
             if (minAxis === 'x') {
                 object.rotation.y = inwardSign > 0 ? Math.PI / 2 : -Math.PI / 2;
             } else {
                 object.rotation.y = inwardSign > 0 ? 0 : Math.PI;
             }
-            
-            object.rotation.x += item.rotation.x * DEG2RAD;
-            object.rotation.y += item.rotation.y * DEG2RAD;
-            object.rotation.z += item.rotation.z * DEG2RAD;
 
-            const surfaceOffset = 0.1;
+            object.rotation.x += itemRot.x * DEG2RAD;
+            object.rotation.y += itemRot.y * DEG2RAD;
+            object.rotation.z += itemRot.z * DEG2RAD;
+
+            // center is now planePos (the registered wall surface plane center).
+            // Offset from it by itemPos + a small surfaceOffset in the inward direction.
             object.position.set(
-                center.x + item.position.x + (minAxis === 'x' ? inwardSign * (size.x / 2 + surfaceOffset) : 0),
-                center.y + item.position.y,
-                center.z + item.position.z + (minAxis === 'z' ? inwardSign * (size.z / 2 + surfaceOffset) : 0)
+                center.x + itemPos.x + (minAxis === 'x' ? inwardSign * surfaceOffset : 0),
+                center.y + itemPos.y + 7.5,
+                center.z + itemPos.z + (minAxis === 'z' ? inwardSign * surfaceOffset : 0)
             );
+
+
+            ensureObjectInFrontOfWall(object, frame);
+        }
+
+        function liftObjectAboveFloor(object, item) {
+            if (!object || item?.allowBelowFloor === true) return;
+            if (item?.autoFloorClamp === false) return;
+            const FLOOR_SURFACE_Y = -1.74;
+            const box = new THREE.Box3().setFromObject(object);
+            if (!Number.isFinite(box.min.y)) return;
+            if (box.min.y < FLOOR_SURFACE_Y) {
+                object.position.y += (FLOOR_SURFACE_Y - box.min.y);
+            }
         }
 
         function addImageToScene(item, showTitle) {
             const imageGroup = new THREE.Group();
+            const itemScale = getItemScaleVec(item);
             const material = new THREE.MeshStandardMaterial({ transparent: true, alphaTest: 0.01, metalness: 0.1, roughness: 0.8, side: THREE.DoubleSide });
             const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
            // plane.castShadow = true;  // Enable shadow casting
            // plane.receiveShadow = true;  // Enable shadow receiving
             imageGroup.add(plane);
+
+            const finalizeImagePlacement = () => {
+                positionOnWall(imageGroup, item);
+                liftObjectAboveFloor(imageGroup, item);
+                needsRender = true;
+            };
 
             textureLoader.load('shows/' + showTitle + '/' + item.src, (tex) => {
                 const imgW = tex.image.naturalWidth || tex.image.width;
@@ -2892,7 +4575,9 @@
                         .map(f => ({ type: f }));
 
                 for (const fd of frameDescriptors) {
-                    const frame = fd.type || '';
+                    const frameRaw = (fd.type || '').trim();
+                    const frame = frameRaw.toLowerCase();
+                    if (!frame || frame === 'none') continue;
                     // Each frame gets its own sub-group so per-frame offset/rotation/scale apply
                     // only to that frame's geometry, not to the image plane itself.
                     const frameGroup = new THREE.Group();
@@ -2920,15 +4605,16 @@
                         material.metalness = 0.0;
                         const fabricRepeatX = Math.max(1, w / 12);
                         const fabricRepeatY = Math.max(1, h / 12);
-                        fabricNormalTexture.repeat.set(fabricRepeatX, fabricRepeatY);
-                        material.normalMap = fabricNormalTexture;
+                        const fabricNormal = getFabricNormalTexture();
+                        fabricNormal.repeat.set(fabricRepeatX, fabricRepeatY);
+                        material.normalMap = fabricNormal;
                         material.normalScale = new THREE.Vector2(0.7, 0.7);
                         material.needsUpdate = true;
 
                         // Drape: replace flat plane with a subdivided mesh whose vertices are
                         // displaced to simulate vertical fabric folds + a gentle forward bow.
                         // Amplitudes are capped in world space so the fabric never pierces the wall.
-                        const scaleMax = Math.max(item.scale.x, item.scale.y);
+                        const scaleMax = Math.max(itemScale.x, itemScale.y);
                         const foldAmp = Math.min(w * 0.02,          0.035 / scaleMax);
                         const bowAmp  = Math.min(Math.max(w, h) * 0.012, 0.020 / scaleMax);
                         const drapedGeo = new THREE.PlaneGeometry(w, h, 8, 24);
@@ -2992,9 +4678,13 @@
                                 gltf.scene.scale.setScalar(Math.min(scaleX, scaleY));
                             }
                             frameGroup.add(gltf.scene);
-                            needsRender = true;
+                            finalizeImagePlacement();
+                        }, undefined, err => {
+                            plane.visible = true;
+                            console.warn('Custom frame GLB not found or failed to load: shows/' + showTitle + '/' + frame, err);
+                            finalizeImagePlacement();
                         });
-                    } else if (frame === 'whiteboard') {
+                    } else if (frame === 'whiteboard' || frame === 'whiteborder') {
                         // Flat white panel with padding on all sides; image sits flush on front face
                         material.roughness = 0.18;
                         material.metalness = 0.4;
@@ -3002,7 +4692,7 @@
                         const pad  = Math.max(w, h) * 0.04;  // padding on each side
                         const boxW = w + pad * 2;
                         const boxH = h + pad * 2;
-                        const boxD = 100;
+                        const boxD = Math.max(w, h) * 0.03;
                         const panelMat = new THREE.MeshStandardMaterial({ color: 0xf8f8f6, roughness: 0.82, metalness: 0.4 });
                         const panel = new THREE.Mesh(new THREE.BoxGeometry(boxW, boxH, boxD), panelMat);
                         panel.castShadow = true;
@@ -3029,9 +4719,8 @@
                         });
                     } else {
                         // Named building asset: "poster1" → ./building/poster1.glb, etc.
-                        // The mesh named "Image" in the GLB receives the image texture;
-                        // the GLB is scaled so that mesh fits the loaded image dimensions.
-                        plane.visible = false;
+                        // The flat plane keeps the texture; the GLB provides the frame border only.
+                        // The GLB's own "Image" mesh is hidden to avoid double-rendering.
                         gltfLoader.load('./building/' + frame + '.glb', (gltf) => {
                             let imageMesh = null;
                             gltf.scene.traverse(child => {
@@ -3047,13 +4736,8 @@
                                 });
                             }
                             if (imageMesh) {
-                                imageMesh.material = new THREE.MeshBasicMaterial({
-                                    map: material.map,
-                                    transparent: material.transparent,
-                                    alphaTest: material.alphaTest,
-                                    opacity: material.opacity,
-                                    side: THREE.DoubleSide
-                                });
+                                // Hide the placeholder mesh; the flat plane already shows the texture.
+                                imageMesh.visible = false;
                                 const box = new THREE.Box3().setFromObject(imageMesh);
                                 const meshSize = box.getSize(new THREE.Vector3());
                                 const scaleX = meshSize.x > 0 ? w / meshSize.x : 1;
@@ -3061,30 +4745,36 @@
                                 gltf.scene.scale.setScalar(Math.min(scaleX, scaleY));
                             }
                             frameGroup.add(gltf.scene);
-                            needsRender = true;
+                            finalizeImagePlacement();
                         }, undefined, err => {
-                            // GLB not found — fall back to plain image
-                            plane.visible = true;
                             console.warn('Frame GLB not found: ./building/' + frame + '.glb', err);
+                            finalizeImagePlacement();
                         });
                     }
                 }
 
-                needsRender = true;
+                finalizeImagePlacement();
+            }, undefined, err => {
+                console.error('Artwork image failed to load:', {
+                    show: showTitle,
+                    src: item.src,
+                    wall: item.wall,
+                    error: err
+                });
             });
 
-            positionOnWall(imageGroup, item);
-            imageGroup.scale.set(item.scale.x, item.scale.y, item.scale.z);
+            imageGroup.scale.set(itemScale.x, itemScale.y, itemScale.z);
+            finalizeImagePlacement();
             scene.add(imageGroup);
             if (item.collider === true) addObjectCollider(imageGroup);
             addItemLight(imageGroup);
-            console.log('Added image to scene:', item.src);
         }
 
         function addModelToScene(item, showTitle) {
             gltfLoader.load('shows/' + showTitle + '/' + item.src, (gltf) => {
                 const model = gltf.scene;
-                model.scale.set(item.scale.x, item.scale.y, item.scale.z);
+                const itemScale = getItemScaleVec(item);
+                model.scale.set(itemScale.x, itemScale.y, itemScale.z);
                 applyGLBMaterials(model, false);
                 if (item.opacity !== undefined && item.opacity < 1) {
                     model.traverse(child => {
@@ -3096,8 +4786,8 @@
                 }
                 positionOnWall(model, item);
                 scene.add(model);
+                liftObjectAboveFloor(model, item);
                 addItemLight(model);
-                console.log('Added model to scene:', item.src);
             }, undefined, error => {
                 console.error('Error loading model:', error);
             });
@@ -3105,24 +4795,16 @@
 
         function addVideoToScene(item, showTitle) {
             const video = document.createElement('video');
+            const itemScale = getItemScaleVec(item);
             video.src = 'shows/' + showTitle + '/' + item.src;
             video.crossOrigin = 'anonymous';
             video.loop = true;
-            video.muted = false;  // Audio routed through Web Audio API
+            video.muted = true; // muted for autoplay; audio routed via Web Audio API
             video.playsInline = true;
             video.autoplay = true;
 
-            // Resume AudioContext on first user interaction (browser autoplay policy)
-            const resumeCtx = () => {
-                if (audioListener.context.state === 'suspended') {
-                    audioListener.context.resume();
-                }
-                video.play();
-                document.removeEventListener('click', resumeCtx);
-                document.removeEventListener('keydown', resumeCtx);
-            };
-            document.addEventListener('click', resumeCtx, { once: true });
-            document.addEventListener('keydown', resumeCtx, { once: true });
+            // Resume AudioContext and media playback on first user interaction.
+            ensureMediaPlaybackUnlocked();
             video.play().catch(() => {});  // Silent fail until user gesture
 
             const videoTex = new THREE.VideoTexture(video);
@@ -3130,18 +4812,22 @@
 
             const w = item.width || 16;
             const h = item.height || 9;
+            const isTransparentVideo = (item.opacity !== undefined && item.opacity < 1);
+            const videoMaterial = new THREE.MeshBasicMaterial({
+                map: videoTex,
+                side: THREE.DoubleSide,
+                transparent: isTransparentVideo,
+                opacity: (item.opacity !== undefined) ? item.opacity : 1,
+                depthWrite: !isTransparentVideo,
+                polygonOffset: true,
+                polygonOffsetFactor: -1,
+                polygonOffsetUnits: -1
+            });
             const plane = new THREE.Mesh(
                 new THREE.PlaneGeometry(w, h),
-                new THREE.MeshBasicMaterial({
-                    map: videoTex,
-                    side: THREE.DoubleSide,
-                    transparent: (item.opacity !== undefined && item.opacity < 1),
-                    opacity: (item.opacity !== undefined) ? item.opacity : 1
-                })
+                videoMaterial
             );
-            if (item.scale) {
-                plane.scale.set(item.scale.x, item.scale.y, item.scale.z);
-            }
+            plane.scale.set(itemScale.x, itemScale.y, itemScale.z);
             video.volume = (item.volume !== undefined) ? Math.min(1, Math.max(0, item.volume)) : 1;
 
             // Positional audio — attaches to the plane so volume falls off with distance
@@ -3163,7 +4849,16 @@
             positionalAudios.push(sound);
 
             positionOnWall(plane, item);
+            if (item.wall === 'Wall10') {
+                const wallData = resolveWallPlacementData(item);
+                if (wallData) {
+                    // Keep Wall10 videos safely in front of the visible wall skin.
+                    plane.position[wallData.minAxis] += wallData.inwardSign * 0.08;
+                    ensureObjectInFrontOfWall(plane, wallData);
+                }
+            }
             scene.add(plane);
+            liftObjectAboveFloor(plane, item);
 
             // Register vo first so the VFC closure can reference it.
             // _distant = true means the plane is beyond VIDEO_PAUSE_DISTANCE;
@@ -3189,28 +4884,24 @@
                     });
                 };
                 video.addEventListener('play', scheduleVFC, { once: false });
+                // Video may already be playing before the listener was added — start immediately.
+                if (!video.paused) scheduleVFC();
             }
             // Fallback (no VFC): animate loop sets needsRender only when !_distant.
-
-            console.log('Added video to scene:', item.src);
         }
 
         function addTvToScene(item, showTitle) {
             // ── Video element ─────────────────────────────────────────────────
             const video = document.createElement('video');
+            const itemScale = getItemScaleVec(item);
             video.src = 'shows/' + showTitle + '/' + item.src;
             video.crossOrigin = 'anonymous';
             video.loop = true;
-            video.muted = false;
+            video.muted = true; // must be muted for autoplay; audio routed via Web Audio API
             video.playsInline = true;
             video.autoplay = true;
 
-            const resumeCtx = () => {
-                if (audioListener.context.state === 'suspended') audioListener.context.resume();
-                video.play();
-            };
-            document.addEventListener('click', resumeCtx, { once: true });
-            document.addEventListener('keydown', resumeCtx, { once: true });
+            ensureMediaPlaybackUnlocked();
             video.play().catch(() => {});
 
             const videoTex = new THREE.VideoTexture(video);
@@ -3260,6 +4951,7 @@
                     });
                 };
                 video.addEventListener('play', scheduleVFC, { once: false });
+                if (!video.paused) scheduleVFC();
             }
 
             // ── TV GLB ────────────────────────────────────────────────────────
@@ -3267,31 +4959,111 @@
             const tvGlb = item.type === 'tvalt' ? 'tvalt.glb' : 'tv.glb';
             gltfLoader.load('./building/' + tvGlb, (gltf) => {
                 const model = gltf.scene;
-                model.scale.set(item.scale.x, item.scale.y, item.scale.z);
+                model.scale.set(itemScale.x, itemScale.y, itemScale.z);
                 applyGLBMaterials(model, false);
                 positionOnWall(model, item);
                 scene.add(model);
+                liftObjectAboveFloor(model, item);
                 addObjectCollider(model);
 
-                // Derive the video plane world position: project the TV model's
-                // AABB onto its screen normal to find the front-face centre.
-                // positionOnWall orients the model so local +Z faces the gallery
-                // interior (the screen side).
-                model.updateMatrixWorld(true);
-                const bbox        = new THREE.Box3().setFromObject(model);
-                const bboxCenter  = bbox.getCenter(new THREE.Vector3());
-                const halfExtents = bbox.getSize(new THREE.Vector3()).multiplyScalar(0.5);
-                const screenNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(model.quaternion);
-                // Support for any wall orientation: project AABB half-extents onto normal.
-                const absN = new THREE.Vector3(
-                    Math.abs(screenNormal.x),
-                    Math.abs(screenNormal.y),
-                    Math.abs(screenNormal.z)
-                );
-                const halfDepth = halfExtents.dot(absN);
-                // Sit the video plane flush on the screen face with a tiny epsilon.
-                plane.position.copy(bboxCenter).addScaledVector(screenNormal, halfDepth + 0.05);
-                plane.quaternion.copy(model.quaternion);
+                // Prefer a dedicated screen mesh if the GLB exposes one; this
+                // makes the video sit on the actual display panel, not the TV body.
+                // Must call after liftObjectAboveFloor so world matrix reflects final position.
+                model.updateMatrixWorld(true, true);
+                const modelForward = new THREE.Vector3(0, 0, 1).applyQuaternion(model.quaternion);
+                const screenNameRx = /(screen|display|monitor|panel|lcd|led)/i;
+                let screenMesh = null;
+                let bestArea = 0;
+                model.traverse((child) => {
+                    if (!child.isMesh || !screenNameRx.test(child.name || '')) return;
+                    const box = new THREE.Box3().setFromObject(child);
+                    const size = box.getSize(new THREE.Vector3());
+                    const area = size.x * size.y + size.x * size.z + size.y * size.z;
+                    if (area > bestArea) {
+                        bestArea = area;
+                        screenMesh = child;
+                    }
+                });
+
+                // Fallback: if the GLB has no obvious screen-named mesh, choose the
+                // most screen-like front-facing thin mesh on the model.
+                if (!screenMesh) {
+                    let bestScore = -Infinity;
+                    model.traverse((child) => {
+                        if (!child.isMesh) return;
+                        const box = new THREE.Box3().setFromObject(child);
+                        const size = box.getSize(new THREE.Vector3());
+                        const center = box.getCenter(new THREE.Vector3());
+                        const depthAlongForward =
+                            Math.abs(modelForward.x) * size.x +
+                            Math.abs(modelForward.y) * size.y +
+                            Math.abs(modelForward.z) * size.z;
+                        const areaLike = size.x * size.y + size.x * size.z + size.y * size.z;
+                        const forwardness = center.dot(modelForward);
+                        const score = (areaLike / Math.max(depthAlongForward, 1e-3)) + forwardness * 0.05;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            screenMesh = child;
+                        }
+                    });
+                }
+
+                const surfaceGap = (item.videoSurfaceOffset !== undefined) ? item.videoSurfaceOffset : 0.001;
+                let screenWidth;
+                let screenHeight;
+                let screenQuat;
+                let screenNormal;
+                let planePos;
+
+                if (screenMesh && screenMesh.geometry) {
+                    if (!screenMesh.geometry.boundingBox) {
+                        screenMesh.geometry.computeBoundingBox();
+                    }
+                    const localBox = screenMesh.geometry.boundingBox;
+                    const localSize = localBox.getSize(new THREE.Vector3());
+                    const localCenter = localBox.getCenter(new THREE.Vector3());
+                    const worldScale = screenMesh.getWorldScale(new THREE.Vector3());
+
+                    screenWidth = Math.abs(localSize.x * worldScale.x);
+                    screenHeight = Math.abs(localSize.y * worldScale.y);
+
+                    screenQuat = screenMesh.getWorldQuaternion(new THREE.Quaternion());
+                    screenNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(screenQuat).normalize();
+                    const worldCenter = localCenter.clone().applyMatrix4(screenMesh.matrixWorld);
+                    const halfDepth = Math.abs(localSize.z * worldScale.z) * 0.5;
+                    planePos = worldCenter.addScaledVector(screenNormal, halfDepth + surfaceGap);
+                } else {
+                    const bbox = new THREE.Box3().setFromObject(model);
+                    const bboxCenter = bbox.getCenter(new THREE.Vector3());
+                    const bboxSize = bbox.getSize(new THREE.Vector3());
+
+                    screenQuat = model.quaternion.clone();
+                    screenNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(screenQuat).normalize();
+                    if (screenNormal.dot(modelForward) < 0) screenNormal.negate();
+
+                    const halfExtents = bboxSize.clone().multiplyScalar(0.5);
+                    const absN = new THREE.Vector3(
+                        Math.abs(screenNormal.x),
+                        Math.abs(screenNormal.y),
+                        Math.abs(screenNormal.z)
+                    );
+                    const halfDepth = halfExtents.dot(absN);
+                    planePos = bboxCenter.addScaledVector(screenNormal, halfDepth + surfaceGap);
+
+                    const nx = Math.abs(screenNormal.x);
+                    const ny = Math.abs(screenNormal.y);
+                    const nz = Math.abs(screenNormal.z);
+                    if (nz >= nx && nz >= ny) {
+                        screenWidth = bboxSize.x; screenHeight = bboxSize.y;
+                    } else if (nx >= ny) {
+                        screenWidth = bboxSize.z; screenHeight = bboxSize.y;
+                    } else {
+                        screenWidth = bboxSize.x; screenHeight = bboxSize.z;
+                    }
+                }
+
+                plane.position.copy(planePos);
+                plane.quaternion.copy(screenQuat);
 
                 // Apply optional per-item videoOffset (world-space x/y/z nudge)
                 // and videoRotation (x/y/z degrees added on top of the TV rotation).
@@ -3301,6 +5073,15 @@
                     plane.position.x += item.videoOffset.x || 0;
                     plane.position.y += item.videoOffset.y || 0;
                     plane.position.z += item.videoOffset.z || 0;
+                }
+                if (item.videoOffsetLocal) {
+                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(plane.quaternion);
+                    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion);
+                    plane.position
+                        .addScaledVector(right, item.videoOffsetLocal.x || 0)
+                        .addScaledVector(up, item.videoOffsetLocal.y || 0)
+                        .addScaledVector(normal, item.videoOffsetLocal.z || 0);
                 }
                 if (item.videoRotation) {
                     plane.rotation.x += (item.videoRotation.x || 0) * DEG2RAD;
@@ -3312,45 +5093,36 @@
                 const vsX = (typeof vsRaw === 'object') ? (vsRaw.x ?? 1) : vsRaw;
                 const vsY = (typeof vsRaw === 'object') ? (vsRaw.y ?? 1) : vsRaw;
                 const vsZ = (typeof vsRaw === 'object') ? (vsRaw.z ?? 1) : vsRaw;
-                // Auto-fit the video plane to the TV model's face dimensions so it
-                // scales correctly at any item.scale, including non-uniform values.
-                const bboxSize = bbox.getSize(new THREE.Vector3());
-                const nx = Math.abs(screenNormal.x);
-                const ny = Math.abs(screenNormal.y);
-                const nz = Math.abs(screenNormal.z);
-                let screenWidth, screenHeight;
-                if (nz >= nx && nz >= ny) {
-                    screenWidth = bboxSize.x; screenHeight = bboxSize.y;
-                } else if (nx >= ny) {
-                    screenWidth = bboxSize.z; screenHeight = bboxSize.y;
-                } else {
-                    screenWidth = bboxSize.x; screenHeight = bboxSize.z;
-                }
+                // Auto-fit the video plane to the detected screen face dimensions.
                 plane.scale.set(screenWidth / vw * vsX, screenHeight / vh * vsY, vsZ);
 
                 scene.add(plane);
-                console.log('Added TV to scene:', item.src);
             }, undefined, err => console.error('TV model load error:', err));
         }
 
         function loadShow() {
+            if (!isBuildingReady) return;
             var hash = window.location.hash.replace('#', '');
             if (hash.length == 0) {
                 return;
             }
             var showTitle = decodeURIComponent(hash);
-            console.log('Loading show: ' + showTitle);
+            if (showTitle === BLANK_GALLERY_VALUE) {
+                return;
+            }
+            if (showLoadInProgress || currentLoadedShow === showTitle) {
+                return;
+            }
+            showLoadInProgress = true;
             
             fetch('shows/' + showTitle + '/meta.json')
                 .then(response => response.json())
                 .then(meta => {
-                    console.log('Show meta:', meta);
                     if (!meta || !meta.media) {
                         throw new Error('Invalid meta.json format');
                     }
                     
                     meta.media.forEach(item => {
-                        console.log('Adding item to scene:', item);
                         if (item.type === 'image') {
                             addImageToScene(item, showTitle);
                         } else if (item.type === 'model') {
@@ -3396,8 +5168,12 @@
                             }
                         });
                     }
+                    currentLoadedShow = showTitle;
                 })
                 .catch(error => {
                     console.error('Error loading show meta:', error);
+                })
+                .finally(() => {
+                    showLoadInProgress = false;
                 });
         }

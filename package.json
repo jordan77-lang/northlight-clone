@@ -1,0 +1,17 @@
+{
+  "name": "northlight-clone",
+  "private": true,
+  "scripts": {
+    "start": "serve docs -l 3000",
+    "dev": "npm start",
+    "compress:glbs": "node scripts/compress-glbs.mjs",
+    "resize:textures": "node scripts/resize-textures.mjs",
+    "inspect:glb": "gltf-transform inspect"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.1.1",
+    "serve": "^14.2.4",
+    "sharp": "^0.35.1",
+    "three": "^0.184.0"
+  }
+}

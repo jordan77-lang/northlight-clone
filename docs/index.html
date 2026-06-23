@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Northlight Gallery - 3D Environment</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <style>
         * {
             margin: 0;
@@ -44,6 +45,30 @@
             border-radius: 8px;
             z-index: 100;
         }
+        #showPicker {
+            margin-bottom: 10px;
+            border-bottom: 1px solid #666;
+            padding-bottom: 10px;
+        }
+        #showPicker label {
+            display: block;
+            color: white;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        #showSelect {
+            width: 100%;
+            padding: 7px 8px;
+            font-size: 12px;
+            border-radius: 5px;
+            border: 1px solid #666;
+            background: rgba(30, 30, 30, 0.9);
+            color: white;
+            outline: none;
+        }
+        #showSelect:focus {
+            border-color: #aaa;
+        }
         .mode-button {
             padding: 8px 15px;
             margin: 5px 0;
@@ -78,6 +103,38 @@
             color: white;
             font-size: 12px;
             cursor: pointer;
+            margin-bottom: 6px;
+        }
+        #debugCheckbox label:last-child {
+            margin-bottom: 0;
+        }
+        #debugCheckbox .hint {
+            font-size: 10px;
+            color: #aaa;
+            margin: 4px 0 0 22px;
+            line-height: 1.35;
+        }
+        #layoutGuideHud {
+            display: none;
+            position: fixed;
+            bottom: 18px;
+            left: 18px;
+            max-width: 380px;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(0, 220, 255, 0.55);
+            border-radius: 8px;
+            color: #ffffff;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            z-index: 120;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+        #layoutGuideHud strong {
+            color: #7dffcb;
+            font-size: 16px;
         }
         #debugCheckbox input {
             margin-right: 8px;
@@ -194,15 +251,27 @@
 </head>
 <body>
     <div id="modeSelector">
+        <div id="showPicker">
+            <label for="showSelect">Select Show</label>
+            <select id="showSelect">
+                <option value="">Loading shows...</option>
+            </select>
+        </div>
         <button class="mode-button active" id="gameModeBtn">Game Mode</button>
         <button class="mode-button" id="exploreModeBtn">Explore Mode</button>
         <div id="debugCheckbox">
             <label>
                 <input type="checkbox" id="debugModeCheckbox">
-                Debug Mode
+                Debug labels
             </label>
+            <label>
+                <input type="checkbox" id="layoutGuideCheckbox">
+                Layout Guide
+            </label>
+            <p class="hint">Wall names + coordinate grid for meta.json art placement</p>
         </div>
     </div>
+    <div id="layoutGuideHud"></div>
     <div id="info">
         <h2>Northlight Gallery</h2>
         <div id="controlsInfo">

@@ -209,6 +209,16 @@
         const showSelect = document.getElementById('showSelect');
         const BLANK_GALLERY_VALUE = '__blank__';
 
+        function buildShowAssetPath(showTitle, assetPath = '') {
+            const encodedShow = encodeURIComponent(String(showTitle || '').trim());
+            const encodedAsset = String(assetPath || '')
+                .split('/')
+                .filter(Boolean)
+                .map(segment => encodeURIComponent(segment))
+                .join('/');
+            return encodedAsset ? `shows/${encodedShow}/${encodedAsset}` : `shows/${encodedShow}`;
+        }
+
         async function discoverShows() {
             const discovered = new Set();
 
@@ -718,7 +728,7 @@
             let modelConfig = null;
             if (isCustom) {
                 if (!item.src) { console.warn('Custom furniture item missing src:', item); return; }
-                glbPath = 'shows/' + showTitle + '/' + item.src;
+                glbPath = buildShowAssetPath(showTitle, item.src);
             } else {
                 modelConfig = modelConfigs[item.model];
                 if (!modelConfig) { console.warn('Unknown furniture model:', item.model); return; }
@@ -4563,7 +4573,7 @@
                 needsRender = true;
             };
 
-            textureLoader.load('shows/' + showTitle + '/' + item.src, (tex) => {
+            textureLoader.load(buildShowAssetPath(showTitle, item.src), (tex) => {
                 const imgW = tex.image.naturalWidth || tex.image.width;
                 const imgH = tex.image.naturalHeight || tex.image.height;
                 const aspect = imgW / imgH;
@@ -4675,7 +4685,7 @@
                         // Name the mesh that should receive the image "Image" — the code will scale
                         // the whole GLB so that mesh fits the loaded image dimensions exactly.
                         plane.visible = false;
-                        gltfLoader.load('shows/' + showTitle + '/' + frame, (gltf) => {
+                        gltfLoader.load(buildShowAssetPath(showTitle, frame), (gltf) => {
                             let imageMesh = null;
                             gltf.scene.traverse(child => {
                                 if (child.isMesh) {
@@ -4703,7 +4713,7 @@
                             finalizeImagePlacement();
                         }, undefined, err => {
                             plane.visible = true;
-                            console.warn('Custom frame GLB not found or failed to load: shows/' + showTitle + '/' + frame, err);
+                            console.warn('Custom frame GLB not found or failed to load:', buildShowAssetPath(showTitle, frame), err);
                             finalizeImagePlacement();
                         });
                     } else if (frame === 'whiteboard' || frame === 'whiteborder') {
@@ -4793,7 +4803,7 @@
         }
 
         function addModelToScene(item, showTitle) {
-            gltfLoader.load('shows/' + showTitle + '/' + item.src, (gltf) => {
+            gltfLoader.load(buildShowAssetPath(showTitle, item.src), (gltf) => {
                 const model = gltf.scene;
                 const itemScale = getItemScaleVec(item);
                 model.scale.set(itemScale.x, itemScale.y, itemScale.z);
@@ -4818,7 +4828,7 @@
         function addVideoToScene(item, showTitle) {
             const video = document.createElement('video');
             const itemScale = getItemScaleVec(item);
-            video.src = 'shows/' + showTitle + '/' + item.src;
+            video.src = buildShowAssetPath(showTitle, item.src);
             video.crossOrigin = 'anonymous';
             video.loop = true;
             video.muted = true; // muted for autoplay; audio routed via Web Audio API
@@ -4916,7 +4926,7 @@
             // ── Video element ─────────────────────────────────────────────────
             const video = document.createElement('video');
             const itemScale = getItemScaleVec(item);
-            video.src = 'shows/' + showTitle + '/' + item.src;
+            video.src = buildShowAssetPath(showTitle, item.src);
             video.crossOrigin = 'anonymous';
             video.loop = true;
             video.muted = true; // must be muted for autoplay; audio routed via Web Audio API
@@ -5137,7 +5147,7 @@
             }
             showLoadInProgress = true;
             
-            fetch('shows/' + showTitle + '/meta.json')
+            fetch(buildShowAssetPath(showTitle, 'meta.json'))
                 .then(response => response.json())
                 .then(meta => {
                     if (!meta || !meta.media) {

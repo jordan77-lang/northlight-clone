@@ -271,7 +271,18 @@
                 })
             )).filter(Boolean);
 
-            verified.sort((a, b) => a.localeCompare(b));
+            const preferredShowOrder = ['unsuspected', 'Rolling Richard'];
+            const preferredRank = (name) => {
+                const index = preferredShowOrder.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase());
+                return index === -1 ? Number.POSITIVE_INFINITY : index;
+            };
+            verified.sort((a, b) => {
+                const rankA = preferredRank(a);
+                const rankB = preferredRank(b);
+                if (rankA !== rankB) return rankA - rankB;
+                if (rankA !== Number.POSITIVE_INFINITY) return 0;
+                return a.localeCompare(b);
+            });
             return verified;
         }
 
@@ -288,7 +299,7 @@
             const shows = await discoverShows();
 
             showSelect.disabled = false;
-            showSelect.innerHTML = '<option value="">Select a show...</option><option value="__blank__">Blank gallery</option>';
+            showSelect.innerHTML = '<option value="__blank__">Blank gallery</option>';
             for (const show of shows) {
                 const option = document.createElement('option');
                 option.value = show;
@@ -368,6 +379,15 @@
             });
             
             if (mode === 'game') {
+                // Game mode is entered via a user gesture; resume audio and unmute video sources.
+                if (audioListener?.context?.state === 'suspended') {
+                    audioListener.context.resume().catch(() => {});
+                }
+                for (const vo of videoObjects) {
+                    vo.video.muted = false;
+                    vo.video.play().catch(() => {});
+                }
+
                 pointerLockReady = false; // require one extra click inside the canvas
                 gameModeBtn.classList.add('active');
                 exploreModeBtn.classList.remove('active');
@@ -3919,11 +3939,13 @@
                     });
                 }
                 for (const vo of videoObjects) {
+                    vo.video.muted = false;
                     vo.video.play().catch(() => {});
                 }
             };
 
             document.addEventListener('click', resumeAllMedia, { once: true });
+            document.addEventListener('pointerdown', resumeAllMedia, { once: true });
             document.addEventListener('keydown', resumeAllMedia, { once: true });
         }
 

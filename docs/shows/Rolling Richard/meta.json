@@ -1,0 +1,571 @@
+{
+  "id": "rolling-richard",
+  "title": "Rolling Richard",
+  "description": "Starter show scaffold for Rolling Richard.",
+  "date": "2026-06-25",
+  "media": [
+    {
+      "type": "tv",
+      "src": "Rolling.mp4",
+      "alt": "",
+      "volume": 0.5,
+      "wall": "Wall13",
+      "position": {
+        "x": 16,
+        "y": -3,
+        "z": -0.6
+      },
+      "rotation": {
+        "x": -2.5,
+        "y": -1,
+        "z": 0
+      },
+      "scale": {
+        "x": 21,
+        "y": 22,
+        "z": 15
+      },
+      "videoOffset": {
+        "x": 0,
+        "y": 0,
+        "z": -0.05
+      },
+      "videoOffsetLocal": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "videoRotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "videoSurfaceOffset": 0,
+      "videoScale": {
+        "x": 0.95,
+        "y": 0.85,
+        "z": 1
+      }
+    },
+    {
+      "type": "tvalt",
+      "src": "Rolling.mp4",
+      "alt": "",
+      "volume": 0.3,
+      "wall": "Wall21",
+      "position": {
+        "x": 0,
+        "y": -2.3,
+        "z": 11.5
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 14,
+        "y": 13,
+        "z": 10
+      },
+      "videoOffset": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "videoRotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "videoScale": {
+        "x": 0.9,
+        "y": 0.9,
+        "z": 1
+      }
+    },
+    {
+      "type": "video",
+      "src": "Rolling.mp4",
+      "alt": "",
+      "volume": 0.5,
+      "wall": "Wall10",
+      "face": 1,
+      "surfaceOffset": 0.35,
+      "position": {
+        "x": 0.3,
+        "y": -5,
+        "z": 0
+      },
+      "opacity": 0.85,
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 2,
+        "y": 2,
+        "z": 2
+      }
+    },
+    {
+      "type": "image",
+      "src": "art name.png",
+      "alt": "",
+      "wall": "Wall12",
+      "position": {
+        "x": -5,
+        "y": -9.0,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "autoFloorClamp": false,
+      "scale": {
+        "x": 0.03,
+        "y": 0.03,
+        "z": 0.03
+      }
+    },
+    {
+      "type": "image",
+      "src": "gallery title.png",
+      "alt": "",
+      "wall": "Wall12",
+      "position": {
+        "x": 20,
+        "y": -9,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "autoFloorClamp": false,
+      "scale": {
+        "x": 0.00945,
+        "y": 0.00945,
+        "z": 0.00945
+      }
+    },
+    {
+      "type": "image",
+      "src": "cave.png",
+      "alt": "",
+      "wall": "Wall11",
+      "position": {
+        "x": 0,
+        "y": -6.5,
+        "z": 30
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "Daly.png",
+      "alt": "",
+      "wall": "Wall11",
+      "position": {
+        "x": 0,
+        "y": -6.5,
+        "z": -30
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "notes.png",
+      "alt": "",
+      "wall": "Wall14",
+      "position": {
+        "x": 0,
+        "y": -10,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "autoFloorClamp": false,
+      "scale": {
+        "x": 0.0486,
+        "y": 0.0486,
+        "z": 0.0486
+      }
+    },
+    {
+      "type": "image",
+      "src": "Goh.png",
+      "alt": "",
+      "wall": "Wall20",
+      "position": {
+        "x": 0,
+        "y": -6.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "velvet.png",
+      "alt": "",
+      "wall": "Wall13",
+      "position": {
+        "x": -17,
+        "y": -6.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "pic.png",
+      "alt": "",
+      "wall": "Wall0",
+      "position": {
+        "x": -25,
+        "y": -6.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "SS2.png",
+      "alt": "",
+      "wall": "Wall9",
+      "position": {
+        "x": 0,
+        "y": -5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "anime.png",
+      "alt": "",
+      "wall": "Wall7",
+      "position": {
+        "x": 0.5,
+        "y": -5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    },
+    {
+      "type": "image",
+      "src": "comic.png",
+      "alt": "",
+      "wall": "Wall5",
+      "position": {
+        "x": -7,
+        "y": -5.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 0.015,
+        "y": 0.015,
+        "z": 0.015
+      }
+    }
+  ],
+  "furniture": [
+    {
+      "type": "pedestal",
+      "id": "SqPedestal",
+      "position": {
+        "x": -40,
+        "y": -2,
+        "z": 7
+      },
+      "size": {
+        "w": 5,
+        "h": 8,
+        "d": 9
+      },
+      "rotation": {
+        "y": 0
+      }
+    },
+    {
+      "type": "pedestal",
+      "id": "RecPedestal",
+      "position": {
+        "x": 24,
+        "y": -2,
+        "z": 12
+      },
+      "size": {
+        "w": 6,
+        "h": 8,
+        "d": 5
+      },
+      "rotation": {
+        "y": 0
+      }
+    },
+    {
+      "type": "pedestal",
+      "id": "mRoomPedestal",
+      "position": {
+        "x": -5,
+        "y": -2,
+        "z": -56
+      },
+      "size": {
+        "w": 5,
+        "h": 8,
+        "d": 16
+      },
+      "rotation": {
+        "y": 90
+      }
+    },
+    {
+      "model": "custom",
+      "src": "bust.glb",
+      "position": {
+        "x": -40,
+        "y": 9.25,
+        "z": 7
+      },
+      "rotation": {
+        "x": 0,
+        "y": 90,
+        "z": 0
+      },
+      "scale": {
+        "x": 6,
+        "y": 6,
+        "z": 6
+      },
+      "collider": false
+    },
+    {
+      "model": "custom",
+      "src": "bust.glb",
+      "position": {
+        "x": 24,
+        "y": 9.25,
+        "z": 12
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 6,
+        "y": 6,
+        "z": 6
+      },
+      "collider": false
+    },
+    {
+      "model": "custom",
+      "src": "bust.glb",
+      "position": {
+        "x": -5,
+        "y": 9.25,
+        "z": -56
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 6,
+        "y": 6,
+        "z": 6
+      },
+      "collider": false
+    },
+    {
+      "model": "custom",
+      "src": "sample (5).glb",
+      "position": {
+        "x": 17,
+        "y": 0,
+        "z": -110
+      },
+      "rotation": {
+        "x": 0,
+        "y": 180,
+        "z": 0
+      },
+      "scale": {
+        "x": 24,
+        "y": 24,
+        "z": 24
+      },
+      "collider": true
+    },
+    {
+      "model": "table",
+      "food": false,
+      "position": {
+        "x": -26,
+        "y": 0,
+        "z": 27
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 30,
+        "y": 30,
+        "z": 30
+      }
+    },
+    {
+      "model": "sofa",
+      "position": {
+        "x": 8,
+        "y": 2.85,
+        "z": 28
+      },
+      "rotation": {
+        "x": 0,
+        "y": 90,
+        "z": 0
+      },
+      "scale": {
+        "x": 15,
+        "y": 15,
+        "z": 15
+      }
+    },
+    {
+      "model": "table2",
+      "position": {
+        "x": 18,
+        "y": -0.1,
+        "z": 29
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 6,
+        "y": 6,
+        "z": 6
+      }
+    },
+    {
+      "model": "table2",
+      "position": {
+        "x": 25,
+        "y": -0.1,
+        "z": 29
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "scale": {
+        "x": 6,
+        "y": 6,
+        "z": 6
+      }
+    },
+    {
+      "model": "sofa2",
+      "position": {
+        "x": 21,
+        "y": 1.9,
+        "z": 39
+      },
+      "rotation": {
+        "x": 0,
+        "y": 180,
+        "z": 0
+      },
+      "scale": {
+        "x": 17,
+        "y": 17,
+        "z": 17
+      }
+    }
+  ]
+}
